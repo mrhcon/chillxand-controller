@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.14"
+CHILLXAND_VERSION="v1.0.15"
 
 set -e  # Exit on any error
 
@@ -221,6 +221,18 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
                 return response.json()
+            elif self.path == '/restart/pod':
+                status_data = self._restart_pod_service()
+                self._send_json_response(status_data)
+                
+            elif self.path == '/restart/xandminer':
+                status_data = self._restart_service('xandminer.service')
+                self._send_json_response(status_data)
+                
+            elif self.path == '/restart/xandminerd':
+                status_data = self._restart_service('xandminerd.service')
+                self._send_json_response(status_data)
+                
             else:
                 return {'error': f'HTTP {response.status_code}'}
         except Exception as e:
@@ -258,6 +270,56 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
         
         return upstream_versions
+    
+    def _restart_pod_service(self):
+        try:
+            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
+                                          capture_output=True, text=True, timeout=10)
+            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status('pod.service')
+            status_data['restart_operation'] = {
+                'symlink_created': symlink_result.returncode == 0,
+                'restart_success': restart_result.returncode == 0,
+                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': 'pod.service',
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
+    
+    def _restart_service(self, service_name):
+        try:
+            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status(service_name)
+            status_data['restart_operation'] = {
+                'restart_success': restart_result.returncode == 0,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
     
     def _get_stats_data(self):
         try:
@@ -335,7 +397,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'summary': f'http://{server_ip}:3001/summary',
                 'status_pod': f'http://{server_ip}:3001/status/pod',
                 'status_xandminer': f'http://{server_ip}:3001/status/xandminer',
-                'status_xandminerd': f'http://{server_ip}:3001/status/xandminerd'
+                'status_xandminerd': f'http://{server_ip}:3001/status/xandminerd',
+                'restart_pod': f'http://{server_ip}:3001/restart/pod',
+                'restart_xandminer': f'http://{server_ip}:3001/restart/xandminer',
+                'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd'
             }
         }
         
@@ -846,12 +911,15 @@ show_completion_info() {
     echo
     info "Available Endpoints:"
     echo "  - GET /health       - RFC-compliant health check with service monitoring"
-    echo "  - GET /summary      - Complete system summary with proxy version"
+    echo "  - GET /summary      - Complete system summary with controller version"
     echo "  - GET /stats        - Proxy to localhost:80/stats"
-    echo "  - GET /versions     - Proxy to localhost:4000/versions + proxy version"
+    echo "  - GET /versions     - Proxy to localhost:4000/versions + controller version"
     echo "  - GET /status/pod   - Pod service status"
     echo "  - GET /status/xandminer - Xandminer service status"
     echo "  - GET /status/xandminerd - Xandminerd service status"
+    echo "  - GET /restart/pod  - Restart pod service (creates symlink)"
+    echo "  - GET /restart/xandminer - Restart xandminer service"
+    echo "  - GET /restart/xandminerd - Restart xandminerd service"
     echo
     info "Version Information:"
     echo "  - ChillXand Controller Version: ${CHILLXAND_VERSION}"
