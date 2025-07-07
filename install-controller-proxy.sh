@@ -114,7 +114,7 @@ import json
 from datetime import datetime
 
 # JSON Proxy Service Version
-PROXY_VERSION = "v1.0.6"
+PROXY_VERSION = "v1.0.7"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -271,13 +271,17 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         return summary
     
     def _get_health_data(self):
+        # Get basic info first
+        current_time = self._get_current_time()
+        server_ip = self._get_server_ip()
+        
         health_data = {
             'status': 'pass',
             'version': '1',
             'serviceId': 'xandeum-node',
             'description': 'Xandeum Node Health Check',
             'proxy_version': PROXY_VERSION,
-            'timestamp': self._get_current_time(),
+            'timestamp': current_time,
             'checks': {},
             'links': {
                 'stats': f'http://{server_ip}:3001/stats',
@@ -290,8 +294,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         }
         
         overall_status = 'pass'
-        current_time = self._get_current_time()
-        server_ip = self._get_server_ip()
         
         # Simplified CPU monitoring (removed time.sleep that was causing issues)
         try:
