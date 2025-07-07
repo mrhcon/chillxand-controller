@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.11"
+CHILLXAND_VERSION="v1.0.12"
 
 set -e  # Exit on any error
 
@@ -117,7 +117,7 @@ import json
 from datetime import datetime
 
 # ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "${CHILLXAND_VERSION}"
+CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
