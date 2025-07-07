@@ -132,7 +132,74 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Get current time in ISO format"""
         return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
-    def _get_service_status(self, service_name):
+    def _get_network_stats(self):
+        """Get network statistics for packets and bytes"""
+        try:
+            network_stats = {}
+            with open('/proc/net/dev', 'r') as f:
+                lines = f.readlines()
+                
+            # Skip header lines
+            for line in lines[2:]:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    interface = parts[0].strip()
+                    # Skip loopback interface
+                    if interface == 'lo':
+                        continue
+                        
+                    stats = parts[1].split()
+                    if len(stats) >= 16:
+                        # bytes_received, packets_received, ..., bytes_transmitted, packets_transmitted
+                        bytes_received = int(stats[0])
+                        packets_received = int(stats[1])
+                        bytes_transmitted = int(stats[8])
+                        packets_transmitted = int(stats[9])
+                        
+                        network_stats[interface] = {
+                            'bytes_received': bytes_received,
+                            'packets_received': packets_received,
+                            'bytes_transmitted': bytes_transmitted,
+                            'packets_transmitted': packets_transmitted,
+                            'total_bytes': bytes_received + bytes_transmitted,
+                            'total_packets': packets_received + packets_transmitted
+                        }
+                        
+            return network_stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _get_cpu_usage(self):
+        """Get current CPU usage percentage"""
+        try:
+            # Read /proc/stat twice with a small delay to calculate usage
+            import time
+            
+            def get_cpu_times():
+                with open('/proc/stat', 'r') as f:
+                    line = f.readline()
+                times = [int(x) for x in line.split()[1:]]
+                return times
+            
+            # Get initial reading
+            times1 = get_cpu_times()
+            time.sleep(0.1)  # Small delay
+            times2 = get_cpu_times()
+            
+            # Calculate differences
+            deltas = [t2 - t1 for t1, t2 in zip(times1, times2)]
+            total_delta = sum(deltas)
+            
+            if total_delta == 0:
+                return 0.0
+                
+            # idle is the 4th value (index 3)
+            idle_delta = deltas[3]
+            cpu_usage = 100.0 * (total_delta - idle_delta) / total_delta
+            
+            return round(cpu_usage, 1)
+        except Exception as e:
+            return None
         try:
             # Get service status
             result = subprocess.run(
@@ -209,7 +276,9 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         current_time = self._get_current_time()
         
         try:
-            # Check system load
+            # Enhanced CPU monitoring with usage percentage
+            cpu_usage = self._get_cpu_usage()
+            
             with open('/proc/loadavg', 'r') as f:
                 load_avg = f.read().strip().split()
                 load_1min = float(load_avg[0])
@@ -218,25 +287,34 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             cpu_count = os.cpu_count() or 1
             load_per_cpu = load_1min / cpu_count
             
-            if load_per_cpu > 2.0:
-                load_status = "fail"
+            # Determine status based on both load and usage
+            if cpu_usage is not None and cpu_usage > 90:
+                cpu_status = "fail"
                 overall_status = "fail"
-            elif load_per_cpu > 1.0:
-                load_status = "warn"
+            elif load_per_cpu > 2.0 or (cpu_usage is not None and cpu_usage > 80):
+                cpu_status = "fail"
+                overall_status = "fail"
+            elif load_per_cpu > 1.0 or (cpu_usage is not None and cpu_usage > 60):
+                cpu_status = "warn"
                 if overall_status == "pass":
                     overall_status = "warn"
             else:
-                load_status = "pass"
+                cpu_status = "pass"
                 
-            health_data["checks"]["system:load"] = {
-                "status": load_status,
+            cpu_check = {
+                "status": cpu_status,
                 "observedValue": load_1min,
                 "observedUnit": "load_average",
                 "time": current_time
             }
             
+            if cpu_usage is not None:
+                cpu_check["cpu_usage_percent"] = cpu_usage
+                
+            health_data["checks"]["system:cpu"] = cpu_check
+            
         except Exception as e:
-            health_data["checks"]["system:load"] = {
+            health_data["checks"]["system:cpu"] = {
                 "status": "fail",
                 "output": str(e)
             }
@@ -273,20 +351,37 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         #     overall_status = "fail"
         
         try:
-            # Check memory
+            # Enhanced memory monitoring
             with open('/proc/meminfo', 'r') as f:
                 meminfo = f.read()
                 
             mem_total = None
             mem_available = None
+            mem_free = None
+            mem_buffers = None
+            mem_cached = None
+            swap_total = None
+            swap_free = None
+            
             for line in meminfo.split('\n'):
                 if line.startswith('MemTotal:'):
                     mem_total = int(line.split()[1]) * 1024  # Convert KB to bytes
                 elif line.startswith('MemAvailable:'):
-                    mem_available = int(line.split()[1]) * 1024  # Convert KB to bytes
+                    mem_available = int(line.split()[1]) * 1024
+                elif line.startswith('MemFree:'):
+                    mem_free = int(line.split()[1]) * 1024
+                elif line.startswith('Buffers:'):
+                    mem_buffers = int(line.split()[1]) * 1024
+                elif line.startswith('Cached:'):
+                    mem_cached = int(line.split()[1]) * 1024
+                elif line.startswith('SwapTotal:'):
+                    swap_total = int(line.split()[1]) * 1024
+                elif line.startswith('SwapFree:'):
+                    swap_free = int(line.split()[1]) * 1024
                     
             if mem_total and mem_available:
                 mem_used_percent = ((mem_total - mem_available) / mem_total) * 100
+                mem_used_bytes = mem_total - mem_available
                 
                 if mem_used_percent > 95:
                     mem_status = "fail"
@@ -298,12 +393,25 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     mem_status = "pass"
                     
-                health_data["checks"]["system:memory"] = {
+                memory_check = {
                     "status": mem_status,
                     "observedValue": round(mem_used_percent, 1),
                     "observedUnit": "percent_used",
-                    "time": current_time
+                    "time": current_time,
+                    "memory_total_bytes": mem_total,
+                    "memory_used_bytes": mem_used_bytes,
+                    "memory_available_bytes": mem_available
                 }
+                
+                # Add swap info if available
+                if swap_total is not None and swap_free is not None:
+                    swap_used = swap_total - swap_free
+                    swap_used_percent = (swap_used / swap_total * 100) if swap_total > 0 else 0
+                    memory_check["swap_total_bytes"] = swap_total
+                    memory_check["swap_used_bytes"] = swap_used
+                    memory_check["swap_used_percent"] = round(swap_used_percent, 1)
+                
+                health_data["checks"]["system:memory"] = memory_check
             
         except Exception as e:
             health_data["checks"]["system:memory"] = {
@@ -312,7 +420,61 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
             overall_status = "fail"
         
-        # Check services
+        # Network statistics monitoring
+        try:
+            network_stats = self._get_network_stats()
+            
+            if 'error' not in network_stats and network_stats:
+                # Aggregate stats across all non-loopback interfaces
+                total_bytes_received = 0
+                total_bytes_transmitted = 0
+                total_packets_received = 0
+                total_packets_transmitted = 0
+                interface_count = 0
+                
+                for interface, stats in network_stats.items():
+                    total_bytes_received += stats['bytes_received']
+                    total_bytes_transmitted += stats['bytes_transmitted']
+                    total_packets_received += stats['packets_received']
+                    total_packets_transmitted += stats['packets_transmitted']
+                    interface_count += 1
+                
+                total_bytes = total_bytes_received + total_bytes_transmitted
+                total_packets = total_packets_received + total_packets_transmitted
+                
+                # Network health is generally pass unless there are no active interfaces
+                if interface_count == 0:
+                    net_status = "warn"
+                    if overall_status == "pass":
+                        overall_status = "warn"
+                else:
+                    net_status = "pass"
+                
+                health_data["checks"]["system:network"] = {
+                    "status": net_status,
+                    "time": current_time,
+                    "active_interfaces": interface_count,
+                    "total_bytes_received": total_bytes_received,
+                    "total_bytes_transmitted": total_bytes_transmitted,
+                    "total_bytes_transferred": total_bytes,
+                    "total_packets_received": total_packets_received,
+                    "total_packets_transmitted": total_packets_transmitted,
+                    "total_packets": total_packets,
+                    "interfaces": network_stats
+                }
+            else:
+                health_data["checks"]["system:network"] = {
+                    "status": "fail",
+                    "output": network_stats.get('error', 'Unknown network error')
+                }
+                overall_status = "fail"
+                
+        except Exception as e:
+            health_data["checks"]["system:network"] = {
+                "status": "fail",
+                "output": str(e)
+            }
+            overall_status = "fail"
         services = ['pod.service', 'xandminer.service', 'xandminerd.service']
         for service in services:
             try:
@@ -814,8 +976,9 @@ show_completion_info() {
     echo "  - GET /restart/xandminerd - Restart xandminerd service"
     echo
     info "Health Check Features:"
-    echo "  - System load monitoring"
-    echo "  - Memory usage monitoring"
+    echo "  - Enhanced CPU monitoring (load + usage percentage)"
+    echo "  - Enhanced memory monitoring (RAM + swap details)"
+    echo "  - Network statistics (packets/bytes transferred)"
     echo "  - Service status monitoring"
     echo "  - Application endpoint checks"
     echo "  - RFC-compliant response format"
