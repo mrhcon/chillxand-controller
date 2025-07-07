@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.12"
+CHILLXAND_VERSION="v1.0.13"
 
 set -e  # Exit on any error
 
@@ -283,7 +283,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'version': '1',
             'serviceId': 'xandeum-node',
             'description': 'Xandeum Node Health Check',
-            'proxy_version': CHILLXAND_CONTROLLER_VERSION,
+            'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
             'timestamp': current_time,
             'checks': {},
             'links': {
@@ -836,7 +836,7 @@ show_completion_info() {
     echo
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
-    echo "  curl -s http://localhost:3001/health | jq '.proxy_version'"
+    echo "  curl -s http://localhost:3001/health | jq '.chillxand_controller_version'"
     echo "  curl -s http://localhost:3001/versions | jq '.data.chillxand_controller'"
     echo
     log "Installation completed successfully!"
