@@ -40,18 +40,60 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    apt update || { error "Failed to update packages"; exit 1; }
+    # Try multiple approaches for apt update
+    if ! apt update; then
+        warn "Standard apt update failed, trying with --allow-unauthenticated..."
+        if ! apt update --allow-unauthenticated; then
+            warn "Apt update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
+            if ! apt update --allow-releaseinfo-change; then
+                warn "All apt update attempts failed, continuing anyway..."
+                warn "Some packages may not be available or up to date"
+            fi
+        fi
+    fi
 
     log "Installing required packages..."
-    apt install -y ufw python3 python3-pip net-tools || { error "Failed to install required packages"; exit 1; }
+    # Install packages one by one with fallbacks
+    for package in ufw python3 python3-pip net-tools; do
+        if ! apt install -y "$package"; then
+            warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
+            if ! apt install -y --allow-unauthenticated "$package"; then
+                if [[ "$package" == "net-tools" ]]; then
+                    warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
+                elif [[ "$package" == "ufw" ]]; then
+                    warn "Failed to install ufw, firewall configuration will be skipped"
+                else
+                    error "Critical package $package could not be installed"
+                    exit 1
+                fi
+            fi
+        else
+            log "Successfully installed $package"
+        fi
+    done
 
     log "Installing Python requests module..."
     # Try to install python3-requests via apt first (preferred method)
     if apt install -y python3-requests; then
         log "Successfully installed python3-requests via apt"
+    elif apt install -y --allow-unauthenticated python3-requests; then
+        log "Successfully installed python3-requests via apt (with --allow-unauthenticated)"
     else
-        warn "Failed to install python3-requests via apt, trying pip with --break-system-packages"
-        pip3 install --break-system-packages requests || { error "Failed to install requests module"; exit 1; }
+        warn "Failed to install python3-requests via apt, trying pip..."
+        # Try different pip installation methods
+        if pip3 install requests; then
+            log "Successfully installed requests via pip3"
+        elif pip3 install --break-system-packages requests; then
+            log "Successfully installed requests via pip3 (with --break-system-packages)"
+        elif python3 -m pip install requests; then
+            log "Successfully installed requests via python3 -m pip"
+        elif python3 -m pip install --break-system-packages requests; then
+            log "Successfully installed requests via python3 -m pip (with --break-system-packages)"
+        else
+            error "Failed to install requests module through all methods"
+            error "Please install python3-requests manually: apt install python3-requests"
+            exit 1
+        fi
     fi
 }
 
@@ -631,18 +673,29 @@ setup_service() {
 setup_firewall() {
     log "Configuring UFW firewall..."
     
-    # Check if UFW is installed and active
-    if command -v ufw &> /dev/null; then
-        if ufw status | grep -q "Status: active"; then
-            log "UFW is already active, adding rule for port 3001..."
-            ufw allow 3001/tcp
+    # Check if UFW is installed and available
+    if ! command -v ufw &> /dev/null; then
+        warn "UFW is not installed or not available. Skipping firewall configuration."
+        warn "Port 3001 may not be accessible from outside without manual firewall configuration."
+        return
+    fi
+    
+    # Check if UFW is active
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        log "UFW is already active, adding rule for port 3001..."
+        if ufw allow 3001/tcp; then
+            log "Successfully added UFW rule for port 3001"
         else
-            info "UFW is not active. Adding rule for port 3001..."
-            ufw allow 3001/tcp
-            warn "UFW is not enabled. You may want to enable it with: sudo ufw enable"
+            warn "Failed to add UFW rule for port 3001"
         fi
     else
-        warn "UFW is not installed. Port 3001 may not be accessible from outside."
+        info "UFW is not active. Adding rule for port 3001..."
+        if ufw allow 3001/tcp; then
+            log "Successfully added UFW rule for port 3001"
+            warn "UFW is not enabled. You may want to enable it with: sudo ufw enable"
+        else
+            warn "Failed to add UFW rule for port 3001"
+        fi
     fi
 }
 
@@ -651,34 +704,49 @@ test_installation() {
     log "Testing installation..."
     
     # Test if the service is listening on port 3001
+    port_check_success=false
+    
     if command -v netstat &> /dev/null; then
         if netstat -tlnp 2>/dev/null | grep -q ":3001 "; then
-            log "Service is listening on port 3001"
-        else
-            warn "Service may not be listening on port 3001"
+            log "Service is listening on port 3001 (detected via netstat)"
+            port_check_success=true
         fi
-    elif command -v ss &> /dev/null; then
+    fi
+    
+    if ! $port_check_success && command -v ss &> /dev/null; then
         if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-            log "Service is listening on port 3001"
-        else
-            warn "Service may not be listening on port 3001"
+            log "Service is listening on port 3001 (detected via ss)"
+            port_check_success=true
         fi
-    else
-        warn "Neither netstat nor ss available to check listening ports"
+    fi
+    
+    if ! $port_check_success; then
+        warn "Could not verify if service is listening on port 3001"
+        warn "This could be due to missing network tools or service startup delay"
     fi
     
     # Test a simple endpoint
     if command -v curl &> /dev/null; then
         log "Testing /summary endpoint..."
-        sleep 2  # Give service time to fully start
-        if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null; then
-            log "Service responds successfully to HTTP requests"
-        else
-            warn "Service may not be responding to HTTP requests"
-            warn "Check service logs: journalctl -u json-proxy.service -n 20"
-        fi
+        sleep 3  # Give service time to fully start
+        
+        # Try multiple times with increasing delays
+        for attempt in 1 2 3; do
+            if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null 2>&1; then
+                log "Service responds successfully to HTTP requests"
+                return 0
+            else
+                warn "Attempt $attempt: Service not responding, waiting..."
+                sleep 2
+            fi
+        done
+        
+        warn "Service may not be responding to HTTP requests after 3 attempts"
+        warn "Check service status: systemctl status json-proxy.service"
+        warn "Check service logs: journalctl -u json-proxy.service -n 20"
     else
         info "curl not available for testing HTTP endpoints"
+        info "You can test manually with: curl http://localhost:3001/summary"
     fi
 }
 
