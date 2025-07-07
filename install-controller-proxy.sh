@@ -114,7 +114,7 @@ import json
 from datetime import datetime
 
 # JSON Proxy Service Version
-PROXY_VERSION = "v1.0.1"
+PROXY_VERSION = "v1.0.2"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -128,6 +128,17 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
     
+    def _get_server_ip(self):
+        """Get the server's IP address"""
+        try:
+            import socket
+            # Get the IP address by connecting to a remote address
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            # Fallback to localhost if we can't determine IP
+            return "localhost"
     def _get_current_time(self):
         return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
@@ -286,17 +297,18 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'timestamp': self._get_current_time(),
             'checks': {},
             'links': {
-                'stats': 'http://localhost:3001/stats',
-                'versions': 'http://localhost:3001/versions',
-                'summary': 'http://localhost:3001/summary',
-                'status_pod': 'http://localhost:3001/status/pod',
-                'status_xandminer': 'http://localhost:3001/status/xandminer',
-                'status_xandminerd': 'http://localhost:3001/status/xandminerd'
+                'stats': f'http://{server_ip}:3001/stats',
+                'versions': f'http://{server_ip}:3001/versions',
+                'summary': f'http://{server_ip}:3001/summary',
+                'status_pod': f'http://{server_ip}:3001/status/pod',
+                'status_xandminer': f'http://{server_ip}:3001/status/xandminer',
+                'status_xandminerd': f'http://{server_ip}:3001/status/xandminerd'
             }
         }
         
         overall_status = 'pass'
         current_time = self._get_current_time()
+        server_ip = self._get_server_ip()
         
         # Enhanced CPU monitoring
         try:
