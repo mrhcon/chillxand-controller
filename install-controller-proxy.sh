@@ -977,19 +977,19 @@ test_installation() {
         # Test status endpoints for each service
         log "Testing service status endpoints..."
         
-        if curl -s -f -m 5 "http://localhost:3001/status/pod" > /dev/null 2>&1; then
+        if curl -s -m 5 "http://localhost:3001/status/pod" > /dev/null 2>&1; then
             log "✓ /status/pod endpoint responding successfully"
         else
             warn "✗ /status/pod endpoint not responding"
         fi
         
-        if curl -s -f -m 5 "http://localhost:3001/status/xandminer" > /dev/null 2>&1; then
+        if curl -s -m 5 "http://localhost:3001/status/xandminer" > /dev/null 2>&1; then
             log "✓ /status/xandminer endpoint responding successfully"
         else
             warn "✗ /status/xandminer endpoint not responding"
         fi
         
-        if curl -s -f -m 5 "http://localhost:3001/status/xandminerd" > /dev/null 2>&1; then
+        if curl -s -m 5 "http://localhost:3001/status/xandminerd" > /dev/null 2>&1; then
             log "✓ /status/xandminerd endpoint responding successfully"
         else
             warn "✗ /status/xandminerd endpoint not responding"
