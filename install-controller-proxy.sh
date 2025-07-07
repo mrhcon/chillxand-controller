@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.23"
+CHILLXAND_VERSION="v1.0.24"
 
 set -e  # Exit on any error
 
@@ -220,19 +220,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
-                return response.json()
-            elif self.path == '/restart/pod':
-                status_data = self._restart_pod_service()
-                self._send_json_response(status_data)
-                
-            elif self.path == '/restart/xandminer':
-                status_data = self._restart_service('xandminer.service')
-                self._send_json_response(status_data)
-                
-            elif self.path == '/restart/xandminerd':
-                status_data = self._restart_service('xandminerd.service')
-                self._send_json_response(status_data)
-                
+                return response.json()              
             else:
                 return {'error': f'HTTP {response.status_code}'}
         except Exception as e:
@@ -377,7 +365,77 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
         }
         return summary
+        
+    def _restart_pod_service(self):
+        try:
+            # Create symlink
+            symlink_result = subprocess.run(
+                ['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            # Restart service
+            restart_result = subprocess.run(
+                ['systemctl', 'restart', 'pod.service'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Get status
+            status_data = self._get_service_status('pod.service')
+            
+            # Add restart operation info
+            status_data['restart_operation'] = {
+                'symlink_created': symlink_result.returncode == 0,
+                'restart_success': restart_result.returncode == 0,
+                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
+                'restart_error': restart_result.stderr if restart_result.stderr else None
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': 'pod.service',
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
     
+    def _restart_service(self, service_name):
+        try:
+            # Restart service
+            restart_result = subprocess.run(
+                ['systemctl', 'restart', service_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Get status
+            status_data = self._get_service_status(service_name)
+            
+            # Add restart operation info
+            status_data['restart_operation'] = {
+                'restart_success': restart_result.returncode == 0,
+                'restart_error': restart_result.stderr if restart_result.stderr else None
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            } 
+        
     def _get_health_data(self):
         # Get basic info first
         current_time = self._get_current_time()
@@ -679,6 +737,51 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             elif self.path == '/versions':
                 versions_data = self._get_versions_data()
                 self._send_json_response(versions_data)
+                
+            elif self.path == '/restart/pod':
+                try:
+                    status_data = self._restart_pod_service()
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))
+                
+            elif self.path == '/restart/xandminer':
+                try:
+                    status_data = self._restart_service('xandminer.service')
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))
+                    
+            elif self.path == '/restart/xandminerd':
+                try:
+                    status_data = self._restart_service('xandminerd.service')
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))               
                 
             else:
                 self.send_error(404, "Not Found")
