@@ -114,7 +114,7 @@ import json
 from datetime import datetime
 
 # JSON Proxy Service Version
-PROXY_VERSION = "v1.0.5"
+PROXY_VERSION = "v1.0.6"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
