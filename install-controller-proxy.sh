@@ -571,7 +571,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     def _get_stats_data(self):
         try:
-            response = requests.get('http://localhost:80/stats', timeout=10)
+            response = requests.get('http://localhost:80/stats', timeout=5)  # Reduced from 10
             if response.status_code == 200:
                 return response.json()
             else:
@@ -583,7 +583,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     def _get_versions_data(self):
         try:
-            response = requests.get('http://localhost:4000/versions', timeout=10)
+            response = requests.get('http://localhost:4000/versions', timeout=5)  # Reduced from 10
             if response.status_code == 200:
                 return response.json()
             else:
@@ -596,14 +596,38 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _get_summary_data(self):
         summary = {
             'timestamp': self._get_current_time(),
-            'stats': self._get_stats_data(),
-            'versions': self._get_versions_data(),
-            'services': {
-                'pod': self._get_service_status('pod.service'),
-                'xandminer': self._get_service_status('xandminer.service'),
-                'xandminerd': self._get_service_status('xandminerd.service')
-            }
+            'stats': None,
+            'versions': None,
+            'services': {}
         }
+        
+        # Try to get stats with a shorter timeout
+        try:
+            summary['stats'] = self._get_stats_data()
+        except Exception as e:
+            summary['stats'] = {'error': f'Failed to get stats: {str(e)}'}
+        
+        # Try to get versions with a shorter timeout  
+        try:
+            summary['versions'] = self._get_versions_data()
+        except Exception as e:
+            summary['versions'] = {'error': f'Failed to get versions: {str(e)}'}
+        
+        # Get service statuses with timeout protection
+        services = ['pod.service', 'xandminer.service', 'xandminerd.service']
+        for service in services:
+            service_name = service.replace('.service', '')
+            try:
+                summary['services'][service_name] = self._get_service_status(service)
+            except Exception as e:
+                summary['services'][service_name] = {
+                    'service': service,
+                    'error': f'Failed to get status: {str(e)}',
+                    'active': 'unknown',
+                    'enabled': 'unknown',
+                    'status_messages': []
+                }
+        
         return summary
     
     def _restart_pod_service(self):
@@ -948,6 +972,27 @@ test_installation() {
             log "✓ /versions endpoint responding successfully"
         else
             info "✗ /versions endpoint not responding (may be normal if upstream service is down)"
+        fi
+        
+        # Test status endpoints for each service
+        log "Testing service status endpoints..."
+        
+        if curl -s -f -m 5 "http://localhost:3001/status/pod" > /dev/null 2>&1; then
+            log "✓ /status/pod endpoint responding successfully"
+        else
+            warn "✗ /status/pod endpoint not responding"
+        fi
+        
+        if curl -s -f -m 5 "http://localhost:3001/status/xandminer" > /dev/null 2>&1; then
+            log "✓ /status/xandminer endpoint responding successfully"
+        else
+            warn "✗ /status/xandminer endpoint not responding"
+        fi
+        
+        if curl -s -f -m 5 "http://localhost:3001/status/xandminerd" > /dev/null 2>&1; then
+            log "✓ /status/xandminerd endpoint responding successfully"
+        else
+            warn "✗ /status/xandminerd endpoint not responding"
         fi
         
     else
