@@ -3,6 +3,9 @@
 # JSON Proxy Service Installation Script
 # This script installs and configures the JSON proxy service
 
+# ChillXand Controller Version - Update this for each deployment
+CHILLXAND_VERSION="v1.0.10"
+
 set -e  # Exit on any error
 
 # Colors for output
@@ -113,8 +116,8 @@ import subprocess
 import json
 from datetime import datetime
 
-# JSON Proxy Service Version
-PROXY_VERSION = "v1.0.7"
+# ChillXand Controller Version
+CHILLXAND_CONTROLLER_VERSION = "${CHILLXAND_VERSION}"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -233,24 +236,24 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 if isinstance(upstream_versions, dict):
                     # If there's a nested data structure, add to it
                     if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
-                        upstream_versions['data']['json_proxy'] = PROXY_VERSION
+                        upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                     else:
                         # Add directly to the main object
-                        upstream_versions['json_proxy'] = PROXY_VERSION
+                        upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                 else:
                     # If upstream returned something unexpected, create our own structure
                     upstream_versions = {
-                        'json_proxy': PROXY_VERSION,
+                        'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                         'upstream_data': upstream_versions
                     }
             else:
                 upstream_versions = {
-                    'json_proxy': PROXY_VERSION,
+                    'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                     'upstream_error': f'HTTP {response.status_code}'
                 }
         except Exception as e:
             upstream_versions = {
-                'json_proxy': PROXY_VERSION,
+                'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                 'upstream_error': str(e)
             }
         
@@ -259,7 +262,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _get_summary_data(self):
         summary = {
             'timestamp': self._get_current_time(),
-            'proxy_version': PROXY_VERSION,
+            'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
             'stats': self._get_stats_data(),
             'versions': self._get_versions_data(),
             'services': {
@@ -280,7 +283,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'version': '1',
             'serviceId': 'xandeum-node',
             'description': 'Xandeum Node Health Check',
-            'proxy_version': PROXY_VERSION,
+            'proxy_version': CHILLXAND_CONTROLLER_VERSION,
             'timestamp': current_time,
             'checks': {},
             'links': {
@@ -582,7 +585,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 PORT = 3001
 if __name__ == "__main__":
     try:
-        print(f"JSON Proxy Service {PROXY_VERSION} starting on port {PORT}")
+        print(f"ChillXand Controller ${CHILLXAND_VERSION} starting on port {PORT}")
         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
             httpd.serve_forever()
@@ -808,9 +811,9 @@ show_completion_info() {
     echo "  - GET /status/xandminerd - Xandminerd service status"
     echo
     info "Version Information:"
-    echo "  - JSON Proxy Version: v1.0.0"
+    echo "  - ChillXand Controller Version: ${CHILLXAND_VERSION}"
     echo "  - Version shown in /health, /summary, and /versions endpoints"
-    echo "  - Proxy version included alongside upstream versions"
+    echo "  - Controller version included alongside upstream versions"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
@@ -834,7 +837,7 @@ show_completion_info() {
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
     echo "  curl -s http://localhost:3001/health | jq '.proxy_version'"
-    echo "  curl -s http://localhost:3001/versions | jq '.data.json_proxy'"
+    echo "  curl -s http://localhost:3001/versions | jq '.data.chillxand_controller'"
     echo
     log "Installation completed successfully!"
 }
