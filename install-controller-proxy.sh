@@ -114,7 +114,7 @@ import json
 from datetime import datetime
 
 # JSON Proxy Service Version
-PROXY_VERSION = "v1.0.2"
+PROXY_VERSION = "v1.0.4"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -207,28 +207,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     def _get_cpu_usage(self):
         try:
-            import time
-            
-            def get_cpu_times():
-                with open('/proc/stat', 'r') as f:
-                    line = f.readline()
-                times = [int(x) for x in line.split()[1:]]
-                return times
-            
-            times1 = get_cpu_times()
-            time.sleep(0.1)
-            times2 = get_cpu_times()
-            
-            deltas = [t2 - t1 for t1, t2 in zip(times1, times2)]
-            total_delta = sum(deltas)
-            
-            if total_delta == 0:
-                return 0.0
-                
-            idle_delta = deltas[3]
-            cpu_usage = 100.0 * (total_delta - idle_delta) / total_delta
-            
-            return round(cpu_usage, 1)
+            # Simplified CPU usage - just return load average for now
+            with open('/proc/loadavg', 'r') as f:
+                load_avg = f.read().strip().split()
+                load_1min = float(load_avg[0])
+            return load_1min
         except Exception as e:
             return None
         try:
@@ -310,10 +293,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         current_time = self._get_current_time()
         server_ip = self._get_server_ip()
         
-        # Enhanced CPU monitoring
+        # Simplified CPU monitoring (removed time.sleep that was causing issues)
         try:
-            cpu_usage = self._get_cpu_usage()
-            
             with open('/proc/loadavg', 'r') as f:
                 load_avg = f.read().strip().split()
                 load_1min = float(load_avg[0])
@@ -322,30 +303,23 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             cpu_count = os.cpu_count() or 1
             load_per_cpu = load_1min / cpu_count
             
-            if cpu_usage is not None and cpu_usage > 90:
+            if load_per_cpu > 2.0:
                 cpu_status = 'fail'
                 overall_status = 'fail'
-            elif load_per_cpu > 2.0 or (cpu_usage is not None and cpu_usage > 80):
-                cpu_status = 'fail'
-                overall_status = 'fail'
-            elif load_per_cpu > 1.0 or (cpu_usage is not None and cpu_usage > 60):
+            elif load_per_cpu > 1.0:
                 cpu_status = 'warn'
                 if overall_status == 'pass':
                     overall_status = 'warn'
             else:
                 cpu_status = 'pass'
                 
-            cpu_check = {
+            health_data['checks']['system:cpu'] = {
                 'status': cpu_status,
                 'observedValue': load_1min,
                 'observedUnit': 'load_average',
+                'load_per_cpu': round(load_per_cpu, 2),
                 'time': current_time
             }
-            
-            if cpu_usage is not None:
-                cpu_check['cpu_usage_percent'] = cpu_usage
-                
-            health_data['checks']['system:cpu'] = cpu_check
             
         except Exception as e:
             health_data['checks']['system:cpu'] = {
