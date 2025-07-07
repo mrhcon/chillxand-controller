@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.13"
+CHILLXAND_VERSION="v1.0.14"
 
 set -e  # Exit on any error
 
@@ -217,6 +217,49 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return load_1min
         except Exception as e:
             return None
+        try:
+            response = requests.get('http://localhost:80/stats', timeout=5)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {'error': f'HTTP {response.status_code}'}
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _get_versions_data(self):
+        try:
+            response = requests.get('http://localhost:4000/versions', timeout=5)
+            if response.status_code == 200:
+                upstream_versions = response.json()
+                
+                # Add our proxy version to the versions response
+                if isinstance(upstream_versions, dict):
+                    # If there's a nested data structure, add to it
+                    if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
+                        upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                    else:
+                        # Add directly to the main object
+                        upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                else:
+                    # If upstream returned something unexpected, create our own structure
+                    upstream_versions = {
+                        'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                        'upstream_data': upstream_versions
+                    }
+            else:
+                upstream_versions = {
+                    'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                    'upstream_error': f'HTTP {response.status_code}'
+                }
+        except Exception as e:
+            upstream_versions = {
+                'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                'upstream_error': str(e)
+            }
+        
+        return upstream_versions
+    
+    def _get_stats_data(self):
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
