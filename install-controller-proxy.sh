@@ -54,7 +54,7 @@ install_dependencies() {
 
     log "Installing required packages..."
     # Install packages one by one with fallbacks
-    for package in ufw python3 python3-pip net-tools; do
+    for package in ufw python3 python3-pip net-tools curl; do
         if ! apt install -y "$package"; then
             warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
             if ! apt install -y --allow-unauthenticated "$package"; then
@@ -62,6 +62,8 @@ install_dependencies() {
                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
                 elif [[ "$package" == "ufw" ]]; then
                     warn "Failed to install ufw, firewall configuration will be skipped"
+                elif [[ "$package" == "curl" ]]; then
+                    warn "Failed to install curl, endpoint testing will be limited"
                 else
                     error "Critical package $package could not be installed"
                     exit 1
@@ -585,7 +587,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, "Not Found")
                 
         except Exception as e:
-            print(f"Error handling GET request: {e}")
+            print(f"Error handling GET request for {self.path}: {e}")
             self.send_error(500, str(e))
     
     def do_POST(self):
@@ -725,28 +727,50 @@ test_installation() {
         warn "This could be due to missing network tools or service startup delay"
     fi
     
-    # Test a simple endpoint
+    # Test endpoints
     if command -v curl &> /dev/null; then
-        log "Testing /summary endpoint..."
+        log "Testing endpoints..."
         sleep 3  # Give service time to fully start
         
-        # Try multiple times with increasing delays
+        # Test health endpoint
         for attempt in 1 2 3; do
-            if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null 2>&1; then
-                log "Service responds successfully to HTTP requests"
-                return 0
+            if curl -s -f -m 10 "http://localhost:3001/health" > /dev/null 2>&1; then
+                log "✓ /health endpoint responding successfully"
+                break
             else
-                warn "Attempt $attempt: Service not responding, waiting..."
+                warn "Attempt $attempt: /health endpoint not responding, waiting..."
                 sleep 2
             fi
         done
         
-        warn "Service may not be responding to HTTP requests after 3 attempts"
-        warn "Check service status: systemctl status json-proxy.service"
-        warn "Check service logs: journalctl -u json-proxy.service -n 20"
+        # Test summary endpoint
+        for attempt in 1 2 3; do
+            if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null 2>&1; then
+                log "✓ /summary endpoint responding successfully"
+                break
+            else
+                warn "Attempt $attempt: /summary endpoint not responding, waiting..."
+                sleep 2
+            fi
+        done
+        
+        # Test stats endpoint
+        if curl -s -f -m 10 "http://localhost:3001/stats" > /dev/null 2>&1; then
+            log "✓ /stats endpoint responding successfully"
+        else
+            info "✗ /stats endpoint not responding (may be normal if upstream service is down)"
+        fi
+        
+        # Test versions endpoint
+        if curl -s -f -m 10 "http://localhost:3001/versions" > /dev/null 2>&1; then
+            log "✓ /versions endpoint responding successfully"
+        else
+            info "✗ /versions endpoint not responding (may be normal if upstream service is down)"
+        fi
+        
     else
         info "curl not available for testing HTTP endpoints"
-        info "You can test manually with: curl http://localhost:3001/summary"
+        info "You can test manually with: curl http://localhost:3001/health"
     fi
 }
 
@@ -764,25 +788,39 @@ show_completion_info() {
     echo "  - Service File: /etc/systemd/system/json-proxy.service"
     echo
     info "Available Endpoints:"
-    echo "  - GET /health       - RFC-compliant health check"
-    echo "  - GET /summary      - Complete system summary"
+    echo "  - GET /health       - RFC-compliant health check with system metrics"
+    echo "  - GET /summary      - Complete system summary with all data"
     echo "  - GET /stats        - Proxy to localhost:80/stats"
     echo "  - GET /versions     - Proxy to localhost:4000/versions"
     echo "  - GET /status/pod   - Pod service status"
     echo "  - GET /status/xandminer - Xandminer service status"
     echo "  - GET /status/xandminerd - Xandminerd service status"
-    echo "  - GET /restart/pod  - Restart pod service"
+    echo "  - GET /restart/pod  - Restart pod service (creates symlink)"
     echo "  - GET /restart/xandminer - Restart xandminer service"
     echo "  - GET /restart/xandminerd - Restart xandminerd service"
+    echo
+    info "Health Check Features:"
+    echo "  - System load monitoring"
+    echo "  - Disk space monitoring"
+    echo "  - Memory usage monitoring"
+    echo "  - Service status monitoring"
+    echo "  - Application endpoint checks"
+    echo "  - RFC-compliant response format"
     echo
     info "Useful Commands:"
     echo "  - Check service status: systemctl status json-proxy.service"
     echo "  - View service logs: journalctl -u json-proxy.service -f"
     echo "  - Restart service: systemctl restart json-proxy.service"
     echo "  - Stop service: systemctl stop json-proxy.service"
-    echo "  - Test endpoint: curl http://localhost:3001/summary"
+    echo "  - Test health endpoint: curl http://localhost:3001/health"
+    echo "  - Test summary endpoint: curl http://localhost:3001/summary"
+    echo
+    info "Example Health Check Usage:"
+    echo "  curl -s http://localhost:3001/health | jq '.status'"
+    echo "  curl -s http://localhost:3001/health | jq '.checks'"
     echo
     log "Installation completed successfully!"
+    log "The /health endpoint is now fully functional with comprehensive system monitoring!"
 }
 
 # Cleanup function for script interruption
