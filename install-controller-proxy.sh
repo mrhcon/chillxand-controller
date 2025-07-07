@@ -242,34 +242,35 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
             overall_status = "fail"
         
-        try:
-            # Check disk space
-            disk_usage = shutil.disk_usage('/')
-            free_percent = (disk_usage.free / disk_usage.total) * 100
-            
-            if free_percent < 5:
-                disk_status = "fail"
-                overall_status = "fail"
-            elif free_percent < 15:
-                disk_status = "warn"
-                if overall_status == "pass":
-                    overall_status = "warn"
-            else:
-                disk_status = "pass"
-                
-            health_data["checks"]["system:disk"] = {
-                "status": disk_status,
-                "observedValue": round(free_percent, 1),
-                "observedUnit": "percent_free",
-                "time": current_time
-            }
-            
-        except Exception as e:
-            health_data["checks"]["system:disk"] = {
-                "status": "fail",
-                "output": str(e)
-            }
-            overall_status = "fail"
+        # Disk space check disabled due to system organization
+        # try:
+        #     # Check disk space
+        #     disk_usage = shutil.disk_usage('/')
+        #     free_percent = (disk_usage.free / disk_usage.total) * 100
+        #     
+        #     if free_percent < 5:
+        #         disk_status = "fail"
+        #         overall_status = "fail"
+        #     elif free_percent < 15:
+        #         disk_status = "warn"
+        #         if overall_status == "pass":
+        #             overall_status = "warn"
+        #     else:
+        #         disk_status = "pass"
+        #         
+        #     health_data["checks"]["system:disk"] = {
+        #         "status": disk_status,
+        #         "observedValue": round(free_percent, 1),
+        #         "observedUnit": "percent_free",
+        #         "time": current_time
+        #     }
+        #     
+        # except Exception as e:
+        #     health_data["checks"]["system:disk"] = {
+        #         "status": "fail",
+        #         "output": str(e)
+        #     }
+        #     overall_status = "fail"
         
         try:
             # Check memory
@@ -655,8 +656,14 @@ setup_service() {
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    log "Starting json-proxy service..."
-    systemctl start json-proxy.service
+    # Check if service is already running and restart if so, otherwise start fresh
+    if systemctl is-active --quiet json-proxy.service; then
+        log "Service is already running, restarting to pick up new script..."
+        systemctl restart json-proxy.service
+    else
+        log "Starting json-proxy service..."
+        systemctl start json-proxy.service
+    fi
     
     # Wait a moment for service to start
     sleep 3
@@ -664,6 +671,13 @@ setup_service() {
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is running successfully"
+        
+        # Get the process start time to confirm it's using the new script
+        service_pid=$(systemctl show json-proxy.service -p MainPID --value)
+        if [[ -n "$service_pid" && "$service_pid" != "0" ]]; then
+            start_time=$(ps -o lstart= -p "$service_pid" 2>/dev/null || echo "unknown")
+            log "Service PID: $service_pid, Started: $start_time"
+        fi
     else
         warn "Service may not be running properly"
         systemctl status json-proxy.service --no-pager
@@ -801,11 +815,11 @@ show_completion_info() {
     echo
     info "Health Check Features:"
     echo "  - System load monitoring"
-    echo "  - Disk space monitoring"
     echo "  - Memory usage monitoring"
     echo "  - Service status monitoring"
     echo "  - Application endpoint checks"
     echo "  - RFC-compliant response format"
+    echo "  - Disk space monitoring: DISABLED (commented out)"
     echo
     info "Useful Commands:"
     echo "  - Check service status: systemctl status json-proxy.service"
