@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.10"
+CHILLXAND_VERSION="v1.0.11"
 
 set -e  # Exit on any error
 
@@ -106,7 +106,7 @@ install_dependencies() {
 create_python_script() {
     log "Creating JSON proxy Python script..."
     
-    cat > /opt/json-proxy.py << 'EOF'
+    cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
 import http.server
 import socketserver
@@ -585,7 +585,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 PORT = 3001
 if __name__ == "__main__":
     try:
-        print(f"ChillXand Controller ${CHILLXAND_VERSION} starting on port {PORT}")
+        print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
             httpd.serve_forever()
