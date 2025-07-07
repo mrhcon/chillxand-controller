@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.15"
+CHILLXAND_VERSION="v1.0.16"
 
 set -e  # Exit on any error
 
@@ -377,6 +377,56 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
         }
         return summary
+    
+    def _restart_pod_service(self):
+        try:
+            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
+                                          capture_output=True, text=True, timeout=10)
+            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status('pod.service')
+            status_data['restart_operation'] = {
+                'symlink_created': symlink_result.returncode == 0,
+                'restart_success': restart_result.returncode == 0,
+                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': 'pod.service',
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
+    
+    def _restart_service(self, service_name):
+        try:
+            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status(service_name)
+            status_data['restart_operation'] = {
+                'restart_success': restart_result.returncode == 0,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
     
     def _get_health_data(self):
         # Get basic info first
@@ -869,7 +919,7 @@ test_installation() {
             info "✗ /versions endpoint not responding (may be normal if upstream service is down)"
         fi
         
-        # Test status endpoints for each service
+        # Test status endpoints for each service (but NOT restart endpoints)
         log "Testing service status endpoints..."
         
         if curl -s -m 5 "http://localhost:3001/status/pod" > /dev/null 2>&1; then
@@ -889,6 +939,8 @@ test_installation() {
         else
             warn "✗ /status/xandminerd endpoint not responding"
         fi
+        
+        info "Note: Restart endpoints (/restart/*) are not tested during installation"
         
     else
         info "curl not available for testing HTTP endpoints"
