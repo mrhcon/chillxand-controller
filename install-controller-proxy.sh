@@ -820,7 +820,6 @@ show_completion_info() {
     echo "  curl -s http://localhost:3001/health | jq '.checks'"
     echo
     log "Installation completed successfully!"
-    log "The /health endpoint is now fully functional with comprehensive system monitoring!"
 }
 
 # Cleanup function for script interruption
