@@ -40,10 +40,10 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    apt update
+    apt update || { error "Failed to update packages"; exit 1; }
 
     log "Installing required packages..."
-    apt install -y ufw python3 python3-pip
+    apt install -y ufw python3 python3-pip net-tools || { error "Failed to install required packages"; exit 1; }
 
     log "Installing Python requests module..."
     # Try to install python3-requests via apt first (preferred method)
@@ -51,7 +51,7 @@ install_dependencies() {
         log "Successfully installed python3-requests via apt"
     else
         warn "Failed to install python3-requests via apt, trying pip with --break-system-packages"
-        pip3 install --break-system-packages requests
+        pip3 install --break-system-packages requests || { error "Failed to install requests module"; exit 1; }
     fi
 }
 
@@ -69,6 +69,7 @@ import subprocess
 import json
 import os
 import shutil
+from datetime import datetime
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -82,6 +83,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self._set_cors_headers()
         self.end_headers()
+    
+    def _get_current_time(self):
+        """Get current time in ISO format"""
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -157,6 +162,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         }
         
         overall_status = "pass"
+        current_time = self._get_current_time()
         
         try:
             # Check system load
@@ -182,8 +188,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 "status": load_status,
                 "observedValue": load_1min,
                 "observedUnit": "load_average",
-                "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                     capture_output=True, text=True).stdout.strip()
+                "time": current_time
             }
             
         except Exception as e:
@@ -212,8 +217,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 "status": disk_status,
                 "observedValue": round(free_percent, 1),
                 "observedUnit": "percent_free",
-                "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                     capture_output=True, text=True).stdout.strip()
+                "time": current_time
             }
             
         except Exception as e:
@@ -253,8 +257,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     "status": mem_status,
                     "observedValue": round(mem_used_percent, 1),
                     "observedUnit": "percent_used",
-                    "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                         capture_output=True, text=True).stdout.strip()
+                    "time": current_time
                 }
             
         except Exception as e:
@@ -289,8 +292,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 health_data["checks"][f"service:{service_name}"] = {
                     "status": service_status,
                     "observedValue": is_active,
-                    "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                         capture_output=True, text=True).stdout.strip()
+                    "time": current_time
                 }
                 
             except Exception as e:
@@ -312,8 +314,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             health_data["checks"]["app:stats"] = {
                 "status": app_status,
                 "observedValue": response.status_code,
-                "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                     capture_output=True, text=True).stdout.strip()
+                "time": current_time
             }
             
         except Exception as e:
@@ -334,8 +335,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             health_data["checks"]["app:versions"] = {
                 "status": versions_status,
                 "observedValue": response.status_code,
-                "time": subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                     capture_output=True, text=True).stdout.strip()
+                "time": current_time
             }
             
         except Exception as e:
@@ -362,9 +362,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             if response.status_code == 200:
                 return response.json()
             else:
-                return {'error': f'HTTP {response.status_code}'}
+                return {'error': f'HTTP {response.status_code}', 'message': 'Failed to fetch stats'}
+        except requests.exceptions.RequestException as e:
+            return {'error': 'Connection failed', 'message': str(e)}
         except Exception as e:
-            return {'error': str(e)}
+            return {'error': 'Unexpected error', 'message': str(e)}
     
     def _get_versions_data(self):
         try:
@@ -372,14 +374,15 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             if response.status_code == 200:
                 return response.json()
             else:
-                return {'error': f'HTTP {response.status_code}'}
+                return {'error': f'HTTP {response.status_code}', 'message': 'Failed to fetch versions'}
+        except requests.exceptions.RequestException as e:
+            return {'error': 'Connection failed', 'message': str(e)}
         except Exception as e:
-            return {'error': str(e)}
+            return {'error': 'Unexpected error', 'message': str(e)}
     
     def _get_summary_data(self):
         summary = {
-            'timestamp': subprocess.run(['date', '-u', '+%Y-%m-%dT%H:%M:%SZ'], 
-                                      capture_output=True, text=True).stdout.strip(),
+            'timestamp': self._get_current_time(),
             'stats': self._get_stats_data(),
             'versions': self._get_versions_data(),
             'services': {
@@ -416,7 +419,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'symlink_created': symlink_result.returncode == 0,
                 'restart_success': restart_result.returncode == 0,
                 'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
-                'restart_error': restart_result.stderr if restart_result.stderr else None
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
             }
             
             return status_data
@@ -446,7 +450,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Add restart operation info
             status_data['restart_operation'] = {
                 'restart_success': restart_result.returncode == 0,
-                'restart_error': restart_result.stderr if restart_result.stderr else None
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
             }
             
             return status_data
@@ -460,10 +465,20 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': []
             }
     
+    def _send_json_response(self, data, status_code=200):
+        """Helper method to send JSON responses"""
+        self.send_response(status_code)
+        self.send_header('Content-type', 'application/json')
+        self._set_cors_headers()
+        self.end_headers()
+        
+        json_response = json.dumps(data, indent=2)
+        self.wfile.write(json_response.encode('utf-8'))
+    
     def do_GET(self):
-        if self.path == '/stats':
-            try:
-                response = requests.get('http://localhost:80/stats')
+        try:
+            if self.path == '/stats':
+                response = requests.get('http://localhost:80/stats', timeout=10)
                 
                 self.send_response(response.status_code)
                 self.send_header('Content-type', 'application/json')
@@ -472,12 +487,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 self.wfile.write(response.content)
                 
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/versions':
-            try:
-                response = requests.get('http://localhost:4000/versions')
+            elif self.path == '/versions':
+                response = requests.get('http://localhost:4000/versions', timeout=10)
                 
                 self.send_response(response.status_code)
                 self.send_header('Content-type', 'application/json')
@@ -486,11 +497,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 self.wfile.write(response.content)
                 
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/health':
-            try:
+            elif self.path == '/health':
                 health_data = self._get_health_data()
                 
                 # Return appropriate HTTP status based on health
@@ -501,124 +508,43 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 else:  # fail
                     http_status = 503  # Service Unavailable
                 
-                self.send_response(http_status)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
+                self._send_json_response(health_data, http_status)
                 
-                json_response = json.dumps(health_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/summary':
-            try:
+            elif self.path == '/summary':
                 summary_data = self._get_summary_data()
+                self._send_json_response(summary_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(summary_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/status/pod':
-            try:
+            elif self.path == '/status/pod':
                 status_data = self._get_service_status('pod.service')
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/status/xandminer':
-            try:
+            elif self.path == '/status/xandminer':
                 status_data = self._get_service_status('xandminer.service')
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/status/xandminerd':
-            try:
+            elif self.path == '/status/xandminerd':
                 status_data = self._get_service_status('xandminerd.service')
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/restart/pod':
-            try:
+            elif self.path == '/restart/pod':
                 status_data = self._restart_pod_service()
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/restart/xandminer':
-            try:
+            elif self.path == '/restart/xandminer':
                 status_data = self._restart_service('xandminer.service')
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-                
-        elif self.path == '/restart/xandminerd':
-            try:
+            elif self.path == '/restart/xandminerd':
                 status_data = self._restart_service('xandminerd.service')
+                self._send_json_response(status_data)
                 
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
+            else:
+                # Return 404 for any other path
+                self.send_error(404, "Not Found")
                 
-                json_response = json.dumps(status_data, indent=2)
-                self.wfile.write(json_response.encode('utf-8'))
-                
-            except Exception as e:
-                self.send_error(500, str(e))
-        else:
-            # Return 404 for any other path
-            self.send_error(404, "Not Found")
+        except Exception as e:
+            print(f"Error handling GET request: {e}")
+            self.send_error(500, str(e))
     
     def do_POST(self):
         self.send_error(405, "Method Not Allowed")
@@ -628,15 +554,23 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     def do_DELETE(self):
         self.send_error(405, "Method Not Allowed")
+    
+    def log_message(self, format, *args):
+        """Override to reduce verbose logging"""
+        return
 
 PORT = 3001
-try:
-    with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
-        print(f"JSON proxy serving on port {PORT}")
-        httpd.serve_forever()
-except KeyboardInterrupt:
-    print("Server stopped")
-    sys.exit(0)
+if __name__ == "__main__":
+    try:
+        with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
+            print(f"JSON proxy serving on port {PORT}")
+            httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("Server stopped")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+        sys.exit(1)
 EOF
 
     chmod +x /opt/json-proxy.py
@@ -659,6 +593,8 @@ WorkingDirectory=/opt
 ExecStart=/usr/bin/python3 /opt/json-proxy.py
 Restart=always
 RestartSec=3
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -679,14 +615,15 @@ setup_service() {
     systemctl start json-proxy.service
     
     # Wait a moment for service to start
-    sleep 2
+    sleep 3
     
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is running successfully"
     else
         warn "Service may not be running properly"
-        systemctl status json-proxy.service
+        systemctl status json-proxy.service --no-pager
+        warn "Check logs with: journalctl -u json-proxy.service -f"
     fi
 }
 
@@ -694,14 +631,18 @@ setup_service() {
 setup_firewall() {
     log "Configuring UFW firewall..."
     
-    # Check if UFW is active
-    if ufw status | grep -q "Status: active"; then
-        log "UFW is already active, adding rule for port 3001..."
-        ufw allow 3001/tcp
+    # Check if UFW is installed and active
+    if command -v ufw &> /dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            log "UFW is already active, adding rule for port 3001..."
+            ufw allow 3001/tcp
+        else
+            info "UFW is not active. Adding rule for port 3001..."
+            ufw allow 3001/tcp
+            warn "UFW is not enabled. You may want to enable it with: sudo ufw enable"
+        fi
     else
-        info "UFW is not active. Adding rule for port 3001..."
-        ufw allow 3001/tcp
-        warn "UFW is not enabled. You may want to enable it with: sudo ufw enable"
+        warn "UFW is not installed. Port 3001 may not be accessible from outside."
     fi
 }
 
@@ -710,19 +651,31 @@ test_installation() {
     log "Testing installation..."
     
     # Test if the service is listening on port 3001
-    if netstat -tlnp 2>/dev/null | grep -q ":3001 "; then
-        log "Service is listening on port 3001"
+    if command -v netstat &> /dev/null; then
+        if netstat -tlnp 2>/dev/null | grep -q ":3001 "; then
+            log "Service is listening on port 3001"
+        else
+            warn "Service may not be listening on port 3001"
+        fi
+    elif command -v ss &> /dev/null; then
+        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+            log "Service is listening on port 3001"
+        else
+            warn "Service may not be listening on port 3001"
+        fi
     else
-        warn "Service may not be listening on port 3001"
+        warn "Neither netstat nor ss available to check listening ports"
     fi
     
     # Test a simple endpoint
     if command -v curl &> /dev/null; then
         log "Testing /summary endpoint..."
-        if curl -s -f "http://localhost:3001/summary" > /dev/null; then
+        sleep 2  # Give service time to fully start
+        if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null; then
             log "Service responds successfully to HTTP requests"
         else
             warn "Service may not be responding to HTTP requests"
+            warn "Check service logs: journalctl -u json-proxy.service -n 20"
         fi
     else
         info "curl not available for testing HTTP endpoints"
@@ -743,6 +696,7 @@ show_completion_info() {
     echo "  - Service File: /etc/systemd/system/json-proxy.service"
     echo
     info "Available Endpoints:"
+    echo "  - GET /health       - RFC-compliant health check"
     echo "  - GET /summary      - Complete system summary"
     echo "  - GET /stats        - Proxy to localhost:80/stats"
     echo "  - GET /versions     - Proxy to localhost:4000/versions"
