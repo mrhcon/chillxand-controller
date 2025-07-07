@@ -557,14 +557,14 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         # Add links
         health_data["links"] = {
             "stats": "http://localhost:3001/stats",
-            "versions": "http://localhost:3001/versions", 
+            "versions": "http://localhost:3001/versions",
             "summary": "http://localhost:3001/summary",
             "status_pod": "http://localhost:3001/status/pod",
             "status_xandminer": "http://localhost:3001/status/xandminer",
             "status_xandminerd": "http://localhost:3001/status/xandminerd",
             "restart_pod": "http://localhost:3001/restart/pod",
             "restart_xandminer": "http://localhost:3001/restart/xandminer",
-            "restart_xandminerd": "http://localhost:3001/restart/xandminerd"            
+            "restart_xandminerd": "http://localhost:3001/restart/xandminerd"
         }
         
         return health_data
