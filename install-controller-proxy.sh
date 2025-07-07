@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.18"
+CHILLXAND_VERSION="v1.0.19"
 
 set -e  # Exit on any error
 
@@ -106,7 +106,7 @@ install_dependencies() {
 create_python_script() {
     log "Creating JSON proxy Python script..."
     
-    cat > /opt/json-proxy.py << EOF
+    cat > /opt/json-proxy.py << 'ENDSCRIPT'
 #!/usr/bin/env python3
 import http.server
 import socketserver
@@ -116,8 +116,8 @@ import subprocess
 import json
 from datetime import datetime
 
-# ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
+# ChillXand Controller Version - This gets replaced by the install script
+CHILLXAND_CONTROLLER_VERSION = "PLACEHOLDER_VERSION"
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -131,19 +131,17 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
     
+    def _get_current_time(self):
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    
     def _get_server_ip(self):
-        """Get the server's IP address"""
         try:
             import socket
-            # Get the IP address by connecting to a remote address
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 return s.getsockname()[0]
         except Exception:
-            # Fallback to localhost if we can't determine IP
             return "localhost"
-    def _get_current_time(self):
-        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -175,152 +173,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'timestamp': self._get_current_time()
             }
     
-    def _get_network_stats(self):
-        try:
-            network_stats = {}
-            with open('/proc/net/dev', 'r') as f:
-                lines = f.readlines()
-                
-            for line in lines[2:]:
-                parts = line.split(':')
-                if len(parts) == 2:
-                    interface = parts[0].strip()
-                    if interface == 'lo':
-                        continue
-                        
-                    stats = parts[1].split()
-                    if len(stats) >= 16:
-                        bytes_received = int(stats[0])
-                        packets_received = int(stats[1])
-                        bytes_transmitted = int(stats[8])
-                        packets_transmitted = int(stats[9])
-                        
-                        network_stats[interface] = {
-                            'bytes_received': bytes_received,
-                            'packets_received': packets_received,
-                            'bytes_transmitted': bytes_transmitted,
-                            'packets_transmitted': packets_transmitted,
-                            'total_bytes': bytes_received + bytes_transmitted,
-                            'total_packets': packets_received + packets_transmitted
-                        }
-                        
-            return network_stats
-        except Exception as e:
-            return {'error': str(e)}
-    
-    def _get_cpu_usage(self):
-        try:
-            # Simplified CPU usage - just return load average for now
-            with open('/proc/loadavg', 'r') as f:
-                load_avg = f.read().strip().split()
-                load_1min = float(load_avg[0])
-            return load_1min
-        except Exception as e:
-            return None
-        try:
-            response = requests.get('http://localhost:80/stats', timeout=5)
-            if response.status_code == 200:
-                return response.json()
-            elif self.path == '/restart/pod':
-                status_data = self._restart_pod_service()
-                self._send_json_response(status_data)
-                
-            elif self.path == '/restart/xandminer':
-                status_data = self._restart_service('xandminer.service')
-                self._send_json_response(status_data)
-                
-            elif self.path == '/restart/xandminerd':
-                status_data = self._restart_service('xandminerd.service')
-                self._send_json_response(status_data)
-                
-            else:
-                return {'error': f'HTTP {response.status_code}'}
-        except Exception as e:
-            return {'error': str(e)}
-    
-    def _get_versions_data(self):
-        try:
-            response = requests.get('http://localhost:4000/versions', timeout=5)
-            if response.status_code == 200:
-                upstream_versions = response.json()
-                
-                # Add our proxy version to the versions response
-                if isinstance(upstream_versions, dict):
-                    # If there's a nested data structure, add to it
-                    if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
-                        upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
-                    else:
-                        # Add directly to the main object
-                        upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
-                else:
-                    # If upstream returned something unexpected, create our own structure
-                    upstream_versions = {
-                        'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                        'upstream_data': upstream_versions
-                    }
-            else:
-                upstream_versions = {
-                    'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                    'upstream_error': f'HTTP {response.status_code}'
-                }
-        except Exception as e:
-            upstream_versions = {
-                'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                'upstream_error': str(e)
-            }
-        
-        return upstream_versions
-    
-    def _restart_pod_service(self):
-        try:
-            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
-                                          capture_output=True, text=True, timeout=10)
-            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
-                                          capture_output=True, text=True, timeout=30)
-            
-            status_data = self._get_service_status('pod.service')
-            status_data['restart_operation'] = {
-                'symlink_created': symlink_result.returncode == 0,
-                'restart_success': restart_result.returncode == 0,
-                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
-                'restart_error': restart_result.stderr if restart_result.stderr else None,
-                'timestamp': self._get_current_time()
-            }
-            
-            return status_data
-            
-        except Exception as e:
-            return {
-                'service': 'pod.service',
-                'error': f'Restart operation failed: {str(e)}',
-                'active': 'unknown',
-                'enabled': 'unknown',
-                'status_messages': []
-            }
-    
-    def _restart_service(self, service_name):
-        try:
-            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
-                                          capture_output=True, text=True, timeout=30)
-            
-            status_data = self._get_service_status(service_name)
-            status_data['restart_operation'] = {
-                'restart_success': restart_result.returncode == 0,
-                'restart_error': restart_result.stderr if restart_result.stderr else None,
-                'timestamp': self._get_current_time()
-            }
-            
-            return status_data
-            
-        except Exception as e:
-            return {
-                'service': service_name,
-                'error': f'Restart operation failed: {str(e)}',
-                'active': 'unknown',
-                'enabled': 'unknown',
-                'status_messages': []
-            }
-    
     def _get_stats_data(self):
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
@@ -337,16 +189,12 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             if response.status_code == 200:
                 upstream_versions = response.json()
                 
-                # Add our proxy version to the versions response
                 if isinstance(upstream_versions, dict):
-                    # If there's a nested data structure, add to it
                     if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
                         upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                     else:
-                        # Add directly to the main object
                         upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                 else:
-                    # If upstream returned something unexpected, create our own structure
                     upstream_versions = {
                         'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                         'upstream_data': upstream_versions
@@ -428,8 +276,49 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': []
             }
     
+    def _get_network_stats(self):
+        try:
+            network_stats = {}
+            with open('/proc/net/dev', 'r') as f:
+                lines = f.readlines()
+                
+            for line in lines[2:]:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    interface = parts[0].strip()
+                    if interface == 'lo':
+                        continue
+                        
+                    stats = parts[1].split()
+                    if len(stats) >= 16:
+                        bytes_received = int(stats[0])
+                        packets_received = int(stats[1])
+                        bytes_transmitted = int(stats[8])
+                        packets_transmitted = int(stats[9])
+                        
+                        network_stats[interface] = {
+                            'bytes_received': bytes_received,
+                            'packets_received': packets_received,
+                            'bytes_transmitted': bytes_transmitted,
+                            'packets_transmitted': packets_transmitted,
+                            'total_bytes': bytes_received + bytes_transmitted,
+                            'total_packets': packets_received + packets_transmitted
+                        }
+                        
+            return network_stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _get_cpu_usage(self):
+        try:
+            with open('/proc/loadavg', 'r') as f:
+                load_avg = f.read().strip().split()
+                load_1min = float(load_avg[0])
+            return load_1min
+        except Exception as e:
+            return None
+    
     def _get_health_data(self):
-        # Get basic info first
         current_time = self._get_current_time()
         server_ip = self._get_server_ip()
         
@@ -456,7 +345,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         
         overall_status = 'pass'
         
-        # Simplified CPU monitoring (removed time.sleep that was causing issues)
+        # Simplified CPU monitoring
         try:
             with open('/proc/loadavg', 'r') as f:
                 load_avg = f.read().strip().split()
@@ -704,6 +593,18 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 status_data = self._get_service_status('xandminerd.service')
                 self._send_json_response(status_data)
                 
+            elif self.path == '/restart/pod':
+                status_data = self._restart_pod_service()
+                self._send_json_response(status_data)
+                
+            elif self.path == '/restart/xandminer':
+                status_data = self._restart_service('xandminer.service')
+                self._send_json_response(status_data)
+                
+            elif self.path == '/restart/xandminerd':
+                status_data = self._restart_service('xandminerd.service')
+                self._send_json_response(status_data)
+                
             elif self.path == '/health':
                 health_data = self._get_health_data()
                 if health_data['status'] == 'pass':
@@ -753,8 +654,11 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to start server: {e}")
         sys.exit(1)
-EOF
+ENDSCRIPT
 
+    # Replace the version placeholder with the actual version
+    sed -i "s/PLACEHOLDER_VERSION/\"$CHILLXAND_VERSION\"/" /opt/json-proxy.py
+    
     chmod +x /opt/json-proxy.py
     log "Python script created and made executable"
 }
@@ -888,10 +792,6 @@ test_installation() {
             if curl -s -f -m 10 "http://localhost:3001/health" > /dev/null 2>&1; then
                 log "✓ /health endpoint responding successfully"
                 break
-            else
-                warn "Attempt $attempt: /health endpoint not responding, waiting..."
-                sleep 2
-            fi
         done
         
         # Test summary endpoint
@@ -996,6 +896,7 @@ show_completion_info() {
     echo "  - Test health endpoint: curl http://localhost:3001/health"
     echo "  - Test summary endpoint: curl http://localhost:3001/summary"
     echo "  - Test versions endpoint: curl http://localhost:3001/versions"
+    echo "  - Test restart endpoint: curl http://localhost:3001/restart/pod"
     echo
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
