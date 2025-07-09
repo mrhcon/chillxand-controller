@@ -104,7 +104,7 @@ install_dependencies() {
 
 # Create the Python script
 create_python_script() {
-    log "Creating JSON proxy Python script..."
+    log "Creating JSON proxy Python script with IP whitelisting..."
     
     cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
@@ -119,14 +119,41 @@ from datetime import datetime
 # ChillXand Controller Version
 CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
 
+# Allowed IP addresses - WHITELIST ONLY
+ALLOWED_IPS = {
+    '74.208.234.116',   # Master (USA)
+    '85.215.145.173',   # Control2 (Germany)
+    '194.164.163.124',  # Control3 (Spain)
+    '174.114.192.84',   # Home
+    '127.0.0.1',        # Localhost
+    '::1'               # IPv6 localhost
+}
+
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
+    def _check_ip_allowed(self):
+        """Check if the client IP is in the allowed list"""
+        client_ip = self.client_address[0]
+        
+        # Handle IPv6-mapped IPv4 addresses
+        if client_ip.startswith('::ffff:'):
+            client_ip = client_ip[7:]  # Remove ::ffff: prefix
+        
+        if client_ip not in ALLOWED_IPS:
+            self.send_error(403, f"Access forbidden from IP: {client_ip}")
+            return False
+        return True
+    
     def _set_cors_headers(self):
+        # Only set CORS headers for allowed IPs
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.send_header('Access-Control-Max-Age', '86400')
     
     def do_OPTIONS(self):
+        if not self._check_ip_allowed():
+            return
+            
         self.send_response(200)
         self._set_cors_headers()
         self.end_headers()
@@ -142,6 +169,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             # Fallback to localhost if we can't determine IP
             return "localhost"
+    
     def _get_current_time(self):
         return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
@@ -217,6 +245,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return load_1min
         except Exception as e:
             return None
+    
+    def _get_stats_data(self):
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
@@ -259,103 +289,15 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         
         return upstream_versions
     
-    def _restart_pod_service(self):
-        try:
-            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
-                                          capture_output=True, text=True, timeout=10)
-            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
-                                          capture_output=True, text=True, timeout=30)
-            
-            status_data = self._get_service_status('pod.service')
-            status_data['restart_operation'] = {
-                'symlink_created': symlink_result.returncode == 0,
-                'restart_success': restart_result.returncode == 0,
-                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
-                'restart_error': restart_result.stderr if restart_result.stderr else None,
-                'timestamp': self._get_current_time()
-            }
-            
-            return status_data
-            
-        except Exception as e:
-            return {
-                'service': 'pod.service',
-                'error': f'Restart operation failed: {str(e)}',
-                'active': 'unknown',
-                'enabled': 'unknown',
-                'status_messages': []
-            }
-    
-    def _restart_service(self, service_name):
-        try:
-            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
-                                          capture_output=True, text=True, timeout=30)
-            
-            status_data = self._get_service_status(service_name)
-            status_data['restart_operation'] = {
-                'restart_success': restart_result.returncode == 0,
-                'restart_error': restart_result.stderr if restart_result.stderr else None,
-                'timestamp': self._get_current_time()
-            }
-            
-            return status_data
-            
-        except Exception as e:
-            return {
-                'service': service_name,
-                'error': f'Restart operation failed: {str(e)}',
-                'active': 'unknown',
-                'enabled': 'unknown',
-                'status_messages': []
-            }
-    
-    def _get_stats_data(self):
-        try:
-            response = requests.get('http://localhost:80/stats', timeout=5)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {'error': f'HTTP {response.status_code}'}
-        except Exception as e:
-            return {'error': str(e)}
-    
-    def _get_versions_data(self):
-        try:
-            response = requests.get('http://localhost:4000/versions', timeout=5)
-            if response.status_code == 200:
-                upstream_versions = response.json()
-                
-                # Add our proxy version to the versions response
-                if isinstance(upstream_versions, dict):
-                    # If there's a nested data structure, add to it
-                    if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
-                        upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
-                    else:
-                        # Add directly to the main object
-                        upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
-                else:
-                    # If upstream returned something unexpected, create our own structure
-                    upstream_versions = {
-                        'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                        'upstream_data': upstream_versions
-                    }
-            else:
-                upstream_versions = {
-                    'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                    'upstream_error': f'HTTP {response.status_code}'
-                }
-        except Exception as e:
-            upstream_versions = {
-                'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
-                'upstream_error': str(e)
-            }
-        
-        return upstream_versions
-    
     def _get_summary_data(self):
         summary = {
             'timestamp': self._get_current_time(),
             'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+            'security': {
+                'ip_whitelisting': 'enabled',
+                'allowed_ips': list(ALLOWED_IPS),
+                'client_ip': self.client_address[0]
+            },
             'stats': self._get_stats_data(),
             'versions': self._get_versions_data(),
             'services': {
@@ -392,7 +334,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'symlink_created': symlink_result.returncode == 0,
                 'restart_success': restart_result.returncode == 0,
                 'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
-                'restart_error': restart_result.stderr if restart_result.stderr else None
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
             }
             
             return status_data
@@ -422,7 +365,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Add restart operation info
             status_data['restart_operation'] = {
                 'restart_success': restart_result.returncode == 0,
-                'restart_error': restart_result.stderr if restart_result.stderr else None
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
             }
             
             return status_data
@@ -434,7 +378,84 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'active': 'unknown',
                 'enabled': 'unknown',
                 'status_messages': []
-            } 
+            }
+    
+    def _update_controller(self):
+        """Update the controller script from GitHub"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Create a temporary script to handle the update
+            update_script = '''#!/bin/bash
+set -e
+echo "Starting controller update..."
+cd /tmp
+wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh
+chmod +x install-controller-proxy.sh
+echo "Downloaded new script, executing..."
+./install-controller-proxy.sh
+echo "Update completed successfully"
+'''
+            
+            # Write the update script
+            with open('/tmp/update-controller.sh', 'w') as f:
+                f.write(update_script)
+            
+            # Make it executable
+            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+            
+            # Execute the update script
+            # This will replace the current script and restart the service
+            update_result = subprocess.run(['/tmp/update-controller.sh'], 
+                                         capture_output=True, text=True, timeout=120)
+            
+            # Combine stdout and stderr for complete output
+            combined_output = ""
+            if update_result.stdout:
+                combined_output += "STDOUT:\n" + update_result.stdout + "\n"
+            if update_result.stderr:
+                combined_output += "STDERR:\n" + update_result.stderr + "\n"
+            
+            # Always return success (200) but include all details
+            return {
+                'operation': 'controller_update',
+                'status': 'completed',
+                'return_code': update_result.returncode,
+                'success': update_result.returncode == 0,
+                'output': combined_output.strip() if combined_output.strip() else 'No output captured',
+                'stdout': update_result.stdout,
+                'stderr': update_result.stderr,
+                'timestamp': current_time,
+                'message': 'Controller update completed successfully' if update_result.returncode == 0 else f'Controller update completed with return code {update_result.returncode}',
+                'notes': 'Update process executed. Check output and return_code for details.'
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'operation': 'controller_update',
+                'status': 'timeout',
+                'return_code': -1,
+                'success': False,
+                'output': 'Update operation timed out after 120 seconds',
+                'stdout': '',
+                'stderr': 'TimeoutExpired',
+                'timestamp': self._get_current_time(),
+                'message': 'Update timed out - check system manually',
+                'notes': 'Process was terminated due to timeout. Manual intervention may be required.'
+            }
+        except Exception as e:
+            return {
+                'operation': 'controller_update',
+                'status': 'error',
+                'return_code': -1,
+                'success': False,
+                'output': f'Exception occurred: {str(e)}',
+                'stdout': '',
+                'stderr': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Update failed with error: {str(e)}',
+                'notes': 'An unexpected error occurred during the update process.'
+            }
         
     def _get_health_data(self):
         # Get basic info first
@@ -448,6 +469,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'description': 'Xandeum Node Health Check',
             'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
             'timestamp': current_time,
+            'security': {
+                'ip_whitelisting': 'enabled',
+                'allowed_ips': list(ALLOWED_IPS),
+                'client_ip': self.client_address[0]
+            },
             'checks': {},
             'links': {
                 'stats': f'http://{server_ip}:3001/stats',
@@ -458,7 +484,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_xandminerd': f'http://{server_ip}:3001/status/xandminerd',
                 'restart_pod': f'http://{server_ip}:3001/restart/pod',
                 'restart_xandminer': f'http://{server_ip}:3001/restart/xandminer',
-                'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd'
+                'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd',
+                'update_controller': f'http://{server_ip}:3001/update/controller'
             }
         }
         
@@ -699,6 +726,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json_response.encode('utf-8'))
     
     def do_GET(self):
+        # Check IP whitelist first
+        if not self._check_ip_allowed():
+            return
+            
         try:
             if self.path == '/status/pod':
                 status_data = self._get_service_status('pod.service')
@@ -781,7 +812,41 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(json_response.encode('utf-8'))
                     
                 except Exception as e:
-                    self.send_error(500, str(e))               
+                    self.send_error(500, str(e))
+                    
+            elif self.path == '/update/controller':
+                try:
+                    update_data = self._update_controller()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(update_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'controller_update',
+                        'status': 'exception',
+                        'return_code': -1,
+                        'success': False,
+                        'output': f'Endpoint exception: {str(e)}',
+                        'stdout': '',
+                        'stderr': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Update endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the update endpoint itself.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))               
                 
             else:
                 self.send_error(404, "Not Found")
@@ -791,12 +856,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, str(e))
     
     def log_message(self, format, *args):
-        return
+        # Log requests with IP addresses for security monitoring
+        client_ip = self.client_address[0]
+        allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
+        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
 PORT = 3001
 if __name__ == "__main__":
     try:
         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
+        print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
             httpd.serve_forever()
@@ -809,7 +878,7 @@ if __name__ == "__main__":
 EOF
 
     chmod +x /opt/json-proxy.py
-    log "Python script created and made executable"
+    log "Python script created with IP whitelisting and made executable"
 }
 
 # Create systemd service
@@ -875,9 +944,9 @@ setup_service() {
     fi
 }
 
-# Configure firewall
+# Configure firewall with IP restrictions
 setup_firewall() {
-    log "Configuring UFW firewall..."
+    log "Configuring UFW firewall with IP restrictions..."
     
     # Check if UFW is installed and available
     if ! command -v ufw &> /dev/null; then
@@ -886,23 +955,53 @@ setup_firewall() {
         return
     fi
     
-    # Check if UFW is active
-    if ufw status 2>/dev/null | grep -q "Status: active"; then
-        log "UFW is already active, adding rule for port 3001..."
-        if ufw allow 3001/tcp; then
-            log "Successfully added UFW rule for port 3001"
-        else
-            warn "Failed to add UFW rule for port 3001"
-        fi
-    else
-        info "UFW is not active. Adding rule for port 3001..."
-        if ufw allow 3001/tcp; then
-            log "Successfully added UFW rule for port 3001"
-            warn "UFW is not enabled. You may want to enable it with: sudo ufw enable"
-        else
-            warn "Failed to add UFW rule for port 3001"
-        fi
-    fi
+    # Reset UFW rules to ensure clean state
+    log "Resetting UFW rules..."
+    ufw --force reset
+    
+    # Set default policies
+    log "Setting default UFW policies..."
+    ufw default deny incoming
+    ufw default allow outgoing
+    
+    # Allow SSH (important - don't lock yourself out!)
+    log "Allowing SSH access..."
+    ufw allow ssh
+    
+    # Allow the specific IPs to access port 3001
+    log "Adding IP whitelist rules for port 3001..."
+    
+    # Master (USA)
+    ufw allow from 74.208.234.116 to any port 3001 comment 'Master USA'
+    log "Added rule for Master (USA): 74.208.234.116"
+    
+    # Control2 (Germany)
+    ufw allow from 85.215.145.173 to any port 3001 comment 'Control2 Germany'
+    log "Added rule for Control2 (Germany): 85.215.145.173"
+    
+    # Control3 (Spain)
+    ufw allow from 194.164.163.124 to any port 3001 comment 'Control3 Spain'
+    log "Added rule for Control3 (Spain): 194.164.163.124"
+    
+    # Home
+    ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
+    log "Added rule for Home: 174.114.192.84"
+    
+    # Allow localhost access
+    ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
+    log "Added rule for localhost: 127.0.0.1"
+    
+    # Explicitly deny all other access to port 3001
+    ufw deny 3001 comment 'Deny all other access to port 3001'
+    log "Added deny rule for all other IPs on port 3001"
+    
+    # Enable UFW
+    log "Enabling UFW firewall..."
+    ufw --force enable
+    
+    # Show the status
+    log "UFW firewall configuration complete. Current rules:"
+    ufw status numbered
 }
 
 # Test the installation
@@ -1023,11 +1122,24 @@ show_completion_info() {
     echo "  - GET /restart/pod  - Restart pod service (creates symlink)"
     echo "  - GET /restart/xandminer - Restart xandminer service"
     echo "  - GET /restart/xandminerd - Restart xandminerd service"
+    echo "  - GET /update/controller - Update controller script from GitHub"
     echo
     info "Version Information:"
     echo "  - ChillXand Controller Version: ${CHILLXAND_VERSION}"
     echo "  - Version shown in /health, /summary, and /versions endpoints"
     echo "  - Controller version included alongside upstream versions"
+    echo
+    info "Security Features:"
+    echo "  - IP Whitelisting: ENABLED"
+    echo "  - Allowed IPs:"
+    echo "    * 74.208.234.116 (Master - USA)"
+    echo "    * 85.215.145.173 (Control2 - Germany)"
+    echo "    * 194.164.163.124 (Control3 - Spain)"
+    echo "    * 174.114.192.84 (Home)"
+    echo "    * 127.0.0.1 (Localhost)"
+    echo "  - All other IPs will receive 403 Forbidden"
+    echo "  - UFW Firewall: Configured with IP restrictions"
+    echo "  - Request logging: Enabled with IP tracking"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
@@ -1047,6 +1159,7 @@ show_completion_info() {
     echo "  - Test health endpoint: curl http://localhost:3001/health"
     echo "  - Test summary endpoint: curl http://localhost:3001/summary"
     echo "  - Test versions endpoint: curl http://localhost:3001/versions"
+    echo "  - Update controller: curl http://localhost:3001/update/controller"
     echo
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
