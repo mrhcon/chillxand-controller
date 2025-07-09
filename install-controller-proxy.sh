@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.36"
+CHILLXAND_VERSION="v1.0.37"
 
 set -e  # Exit on any error
 
@@ -344,44 +344,75 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub - Fire and forget method"""
+        """Update the controller script from GitHub - Completely independent process"""
         try:
             current_time = self._get_current_time()
             
+            # Create a completely independent update script that will survive service restart
             update_script = '''#!/bin/bash
-set -e
-sleep 2
-echo "Starting controller update..." > /tmp/update.log 2>&1
-cd /tmp
-wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh >> /tmp/update.log 2>&1
-chmod +x install-controller-proxy.sh
-echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
-./install-controller-proxy.sh >> /tmp/update.log 2>&1
-echo "Update completed successfully" >> /tmp/update.log 2>&1
-rm -f /tmp/update-controller.sh
+# Completely detach from parent process
+exec </dev/null >/dev/null 2>&1
+disown
+
+# Sleep to allow HTTP response to be sent
+sleep 5
+
+# Log everything
+{
+    echo "===== Controller Update Started: $(date) ====="
+    echo "Starting controller update..."
+    
+    cd /tmp
+    echo "Downloading new script..."
+    if wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
+        echo "Download successful"
+        chmod +x install-controller-proxy.sh
+        echo "Executing new script..."
+        if ./install-controller-proxy.sh; then
+            echo "===== Update completed successfully: $(date) ====="
+        else
+            echo "===== Update script failed: $(date) ====="
+        fi
+    else
+        echo "===== Download failed: $(date) ====="
+    fi
+    
+    # Clean up
+    rm -f /tmp/update-controller.sh
+    echo "Cleanup completed"
+    
+} >> /tmp/update.log 2>&1 &
+
+# Exit the update script process completely
+exit 0
 '''
             
+            # Write the update script
             with open('/tmp/update-controller.sh', 'w') as f:
                 f.write(update_script)
             
+            # Make it executable
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            subprocess.Popen(['/tmp/update-controller.sh'], 
+            # Start the process completely detached using nohup and background it
+            subprocess.Popen(['nohup', '/tmp/update-controller.sh'], 
                            stdout=subprocess.DEVNULL, 
                            stderr=subprocess.DEVNULL,
-                           start_new_session=True)
+                           stdin=subprocess.DEVNULL,
+                           start_new_session=True,
+                           preexec_fn=os.setsid)
             
             return {
                 'operation': 'controller_update',
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started in background. Service will restart automatically.',
-                'stdout': 'Update initiated successfully',
+                'output': 'Update process started as completely independent background job.',
+                'stdout': 'Update initiated successfully with full detachment',
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'notes': 'Update is running in background. Check /tmp/update.log for progress. Service will restart automatically when complete.'
+                'notes': 'Update is running as detached process. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
             
         except Exception as e:
