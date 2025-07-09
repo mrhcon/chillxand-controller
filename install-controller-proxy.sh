@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.62"
+CHILLXAND_VERSION="v1.0.63"
 
 set -e  # Exit on any error
 
@@ -43,12 +43,12 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    # Try multiple approaches for apt-get update (redirect warnings to stderr)
-    if ! apt-get update >/dev/null 2>&1; then
+    # Try multiple approaches for apt-get update (redirect stderr to suppress warnings)
+    if ! apt-get update 2>/dev/null; then
         warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
-        if ! apt-get update --allow-unauthenticated >/dev/null 2>&1; then
+        if ! apt-get update --allow-unauthenticated 2>/dev/null; then
             warn "Apt-get update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
-            if ! apt-get update --allow-releaseinfo-change >/dev/null 2>&1; then
+            if ! apt-get update --allow-releaseinfo-change 2>/dev/null; then
                 warn "All apt-get update attempts failed, continuing anyway..."
                 warn "Some packages may not be available or up to date"
             fi
@@ -56,11 +56,11 @@ install_dependencies() {
     fi
 
     log "Installing required packages..."
-    # Install packages one by one with fallbacks using apt-get (redirect warnings to stderr)
+    # Install packages one by one with fallbacks using apt-get (redirect stderr to suppress warnings)
     for package in ufw python3 python3-pip net-tools curl; do
-        if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y "$package" >/dev/null 2>&1; then
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y "$package" 2>/dev/null; then
             warn "Failed to install $package via apt-get, trying with --allow-unauthenticated..."
-            if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated "$package" >/dev/null 2>&1; then
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated "$package" 2>/dev/null; then
                 if [[ "$package" == "net-tools" ]]; then
                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
                 elif [[ "$package" == "ufw" ]]; then
@@ -78,10 +78,10 @@ install_dependencies() {
     done
 
     log "Installing Python requests module..."
-    # Try to install python3-requests via apt-get first (redirect warnings to stderr)
-    if DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-requests >/dev/null 2>&1; then
+    # Try to install python3-requests via apt-get first (redirect stderr to suppress warnings)
+    if DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-requests 2>/dev/null; then
         log "Successfully installed python3-requests via apt-get"
-    elif DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated python3-requests >/dev/null 2>&1; then
+    elif DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated python3-requests 2>/dev/null; then
         log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
     else
         warn "Failed to install python3-requests via apt-get, trying pip..."
@@ -426,8 +426,7 @@ exit 0
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress.'
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION
             }
             
         except Exception as e:
