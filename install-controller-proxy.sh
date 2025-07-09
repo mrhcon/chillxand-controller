@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.27"
+CHILLXAND_VERSION="v1.0.28"
 
 set -e  # Exit on any error
 
@@ -108,12 +108,14 @@ create_python_script() {
     
     cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 import http.server
 import socketserver
 import requests
 import sys
 import subprocess
 import json
+import os
 from datetime import datetime
 
 # ChillXand Controller Version
@@ -192,6 +194,91 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': status_messages,
                 'return_code': result.returncode,
                 'timestamp': self._get_current_time()
+    def _get_update_log(self):
+        """Get the contents of the update log file"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Check if log file exists
+            log_file = '/tmp/update.log'
+            if not os.path.exists(log_file):
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'no_log',
+                    'success': True,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': 0,
+                    'last_modified': None,
+                    'timestamp': current_time,
+                    'message': 'No update log file found',
+                    'notes': 'Update log will be created when an update is initiated.'
+                }
+            
+            # Get file stats
+            import os
+            stat = os.stat(log_file)
+            file_size = stat.st_size
+            last_modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            # Read the log file
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+                
+                # Split into lines for easier parsing
+                log_lines = log_content.strip().split('\n') if log_content.strip() else []
+                
+                # Determine status based on log content
+                if 'Update completed successfully' in log_content:
+                    status = 'completed_success'
+                elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    status = 'completed_error'
+                elif log_content.strip():
+                    status = 'in_progress'
+                else:
+                    status = 'empty'
+                
+                return {
+                    'operation': 'get_update_log',
+                    'status': status,
+                    'success': True,
+                    'log_content': log_content,
+                    'log_lines': log_lines,
+                    'line_count': len(log_lines),
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'timestamp': current_time,
+                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
+                    'notes': f'Log file last modified: {last_modified}'
+                }
+                
+            except Exception as read_error:
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'read_error',
+                    'success': False,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'error': str(read_error),
+                    'timestamp': current_time,
+                    'message': f'Failed to read update log: {str(read_error)}',
+                    'notes': 'Log file exists but could not be read.'
+                }
+                
+        except Exception as e:
+            return {
+                'operation': 'get_update_log',
+                'status': 'error',
+                'success': False,
+                'log_content': '',
+                'log_lines': [],
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Failed to access update log: {str(e)}',
+                'notes': 'An error occurred while trying to access the log file.'
             }
         except Exception as e:
             return {
@@ -470,7 +557,8 @@ rm -f /tmp/update-controller.sh
                 'restart_pod': f'http://{server_ip}:3001/restart/pod',
                 'restart_xandminer': f'http://{server_ip}:3001/restart/xandminer',
                 'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd',
-                'update_controller': f'http://{server_ip}:3001/update/controller'
+                'update_controller': f'http://{server_ip}:3001/update/controller',
+                'update_controller_log': f'http://{server_ip}:3001/update/controller/log'
             }
         }
         
@@ -831,6 +919,39 @@ rm -f /tmp/update-controller.sh
                     self._set_cors_headers()
                     self.end_headers()
                     json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+            elif self.path == '/update/controller/log':
+                try:
+                    log_data = self._get_update_log()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(log_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'get_update_log',
+                        'status': 'exception',
+                        'success': False,
+                        'log_content': '',
+                        'log_lines': [],
+                        'error': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Update log endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the update log endpoint.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
                     self.wfile.write(json_response.encode('utf-8'))               
                 
             else:
@@ -1108,6 +1229,7 @@ show_completion_info() {
     echo "  - GET /restart/xandminer - Restart xandminer service"
     echo "  - GET /restart/xandminerd - Restart xandminerd service"
     echo "  - GET /update/controller - Update controller script from GitHub"
+    echo "  - GET /update/controller/log - View update log from last update operation"
     echo
     info "Version Information:"
     echo "  - ChillXand Controller Version: ${CHILLXAND_VERSION}"
@@ -1145,6 +1267,7 @@ show_completion_info() {
     echo "  - Test summary endpoint: curl http://localhost:3001/summary"
     echo "  - Test versions endpoint: curl http://localhost:3001/versions"
     echo "  - Update controller: curl http://localhost:3001/update/controller"
+    echo "  - Check update log: curl http://localhost:3001/update/controller/log"
     echo
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
