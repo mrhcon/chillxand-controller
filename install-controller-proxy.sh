@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.60"
+CHILLXAND_VERSION="v1.0.61"
 
 set -e  # Exit on any error
 
@@ -426,7 +426,8 @@ exit 0
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress. Service will restart automatically when complete.'
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress.'
             }
             
         except Exception as e:
@@ -440,6 +441,7 @@ exit 0
                 'stderr': str(e),
                 'timestamp': self._get_current_time(),
                 'message': f'Update initiation failed: {str(e)}',
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
                 'notes': 'Failed to start the background update process.'
             }
     
