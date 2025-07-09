@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.25"
+CHILLXAND_VERSION="v1.0.26"
 
 set -e  # Exit on any error
 
@@ -124,7 +124,7 @@ ALLOWED_IPS = {
     '74.208.234.116',   # Master (USA)
     '85.215.145.173',   # Control2 (Germany)
     '194.164.163.124',  # Control3 (Spain)
-    '174.114.192.84',   # Home
+    '67.70.165.78',   # Home
     '127.0.0.1',        # Localhost
     '::1'               # IPv6 localhost
 }
@@ -984,8 +984,8 @@ setup_firewall() {
     log "Added rule for Control3 (Spain): 194.164.163.124"
     
     # Home
-    ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
-    log "Added rule for Home: 174.114.192.84"
+    ufw allow from 67.70.165.78 to any port 3001 comment 'Home'
+    log "Added rule for Home: 67.70.165.78"
     
     # Allow localhost access
     ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
@@ -1135,7 +1135,7 @@ show_completion_info() {
     echo "    * 74.208.234.116 (Master - USA)"
     echo "    * 85.215.145.173 (Control2 - Germany)"
     echo "    * 194.164.163.124 (Control3 - Spain)"
-    echo "    * 174.114.192.84 (Home)"
+    echo "    * 67.70.165.78 (Home)"
     echo "    * 127.0.0.1 (Localhost)"
     echo "  - All other IPs will receive 403 Forbidden"
     echo "  - UFW Firewall: Configured with IP restrictions"
