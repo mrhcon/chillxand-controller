@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.43"
+CHILLXAND_VERSION="v1.0.44"
 
 set -e  # Exit on any error
 
@@ -343,7 +343,51 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': []
             }
     
-    def _update_controller(self):
+    def _compare_versions(self, current_version, new_version):
+        """Compare two version strings (e.g., v1.0.26 vs v1.0.27)"""
+        try:
+            # Remove 'v' prefix and split by dots
+            current_parts = current_version.lstrip('v').split('.')
+            new_parts = new_version.lstrip('v').split('.')
+            
+            # Pad shorter version with zeros
+            max_len = max(len(current_parts), len(new_parts))
+            current_parts += ['0'] * (max_len - len(current_parts))
+            new_parts += ['0'] * (max_len - len(new_parts))
+            
+            # Compare each part as integers
+            for i in range(max_len):
+                current_num = int(current_parts[i])
+                new_num = int(new_parts[i])
+                
+                if new_num > current_num:
+                    return 1  # New version is higher
+                elif new_num < current_num:
+                    return -1  # New version is lower
+            
+            return 0  # Versions are equal
+            
+        except (ValueError, IndexError) as e:
+            # If version parsing fails, assume update is needed
+            return 1
+    
+    def _get_new_script_version(self, script_path):
+        """Extract version from downloaded script"""
+        try:
+            with open(script_path, 'r') as f:
+                content = f.read()
+                
+            # Look for CHILLXAND_VERSION line
+            for line in content.split('\n'):
+                if line.strip().startswith('CHILLXAND_VERSION='):
+                    # Extract version from line like: CHILLXAND_VERSION="v1.0.27"
+                    version = line.split('=')[1].strip().strip('"').strip("'")
+                    return version
+                    
+            return None
+            
+        except Exception as e:
+            return None
         """Update the controller script from GitHub - No interruption version"""
         try:
             current_time = self._get_current_time()
