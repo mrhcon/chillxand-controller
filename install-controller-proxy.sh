@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.34"
+CHILLXAND_VERSION="v1.0.35"
 
 set -e  # Exit on any error
 
@@ -106,7 +106,7 @@ install_dependencies() {
 create_python_script() {
     log "Creating JSON proxy Python script with IP whitelisting..."
     
-    cat > /opt/json-proxy.py << 'EOF'
+    cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
 import http.server
 import socketserver
@@ -118,7 +118,7 @@ import os
 from datetime import datetime
 
 # ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
+CHILLXAND_CONTROLLER_VERSION = "${CHILLXAND_VERSION}"
 
 # Allowed IP addresses - WHITELIST ONLY
 ALLOWED_IPS = {
@@ -127,8 +127,7 @@ ALLOWED_IPS = {
     '194.164.163.124',  # Control3 (Spain)
     '174.114.192.84',   # Home (add your actual IP here)
     '67.70.165.78',     # Home (secondary IP)
-    '127.0.0.1',        # Localhost
-    '::1'               # IPv6 localhost
+    '127.0.0.1'         # Localhost
 }
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
