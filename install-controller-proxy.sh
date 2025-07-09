@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.38"
+CHILLXAND_VERSION="v1.0.39"
 
 set -e  # Exit on any error
 
@@ -344,21 +344,20 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub - Completely independent process"""
+        """Update the controller script from GitHub - Simplified independent process"""
         try:
             current_time = self._get_current_time()
             
-            # Create a completely independent update script that will survive service restart
+            # Create a robust update script that detaches itself
             update_script = '''#!/bin/bash
-# Completely detach from parent process
-exec </dev/null >/dev/null 2>&1
-disown
-
-# Sleep to allow HTTP response to be sent
-sleep 5
-
-# Log everything
-{
+# Simple but effective detachment
+nohup bash -c '
+    # Sleep to allow HTTP response to be sent
+    sleep 5
+    
+    # Log everything to update.log
+    exec >> /tmp/update.log 2>&1
+    
     echo "===== Controller Update Started: $(date) ====="
     echo "Starting controller update..."
     
@@ -381,9 +380,9 @@ sleep 5
     rm -f /tmp/update-controller.sh
     echo "Cleanup completed"
     
-} >> /tmp/update.log 2>&1 &
+' >/dev/null 2>&1 &
 
-# Exit the update script process completely
+# Exit immediately
 exit 0
 '''
             
@@ -394,25 +393,23 @@ exit 0
             # Make it executable
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Start the process completely detached using nohup and background it
-            subprocess.Popen(['nohup', '/tmp/update-controller.sh'], 
+            # Start the process simply with just background execution
+            subprocess.Popen(['/bin/bash', '/tmp/update-controller.sh'], 
                            stdout=subprocess.DEVNULL, 
                            stderr=subprocess.DEVNULL,
-                           stdin=subprocess.DEVNULL,
-                           start_new_session=True,
-                           preexec_fn=os.setsid)
+                           stdin=subprocess.DEVNULL)
             
             return {
                 'operation': 'controller_update',
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started as completely independent background job.',
-                'stdout': 'Update initiated successfully with full detachment',
+                'output': 'Update process started as independent background job.',
+                'stdout': 'Update initiated successfully with nohup detachment',
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'notes': 'Update is running as detached process. Check /tmp/update.log for progress. Service will restart automatically when complete.'
+                'notes': 'Update is running as detached nohup process. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
             
         except Exception as e:
