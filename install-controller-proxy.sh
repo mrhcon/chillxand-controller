@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.30"
+CHILLXAND_VERSION="v1.0.31"
 
 set -e  # Exit on any error
 
@@ -126,7 +126,8 @@ ALLOWED_IPS = {
     '74.208.234.116',   # Master (USA)
     '85.215.145.173',   # Control2 (Germany)
     '194.164.163.124',  # Control3 (Spain)
-    '174.114.192.84',   # Home
+    '174.114.192.84',   # Home (add your actual IP here)
+    # 'YOUR_ACTUAL_HOME_IP',  # Replace with your actual IP from curl ifconfig.me
     '127.0.0.1',        # Localhost
     '::1'               # IPv6 localhost
 }
