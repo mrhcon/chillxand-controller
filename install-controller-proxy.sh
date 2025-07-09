@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.33"
+CHILLXAND_VERSION="v1.0.34"
 
 set -e  # Exit on any error
 
@@ -118,7 +118,7 @@ import os
 from datetime import datetime
 
 # ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "v1.0.26"
+CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
 
 # Allowed IP addresses - WHITELIST ONLY
 ALLOWED_IPS = {
