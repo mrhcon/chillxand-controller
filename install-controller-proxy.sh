@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.40"
+CHILLXAND_VERSION="v1.0.41"
 
 set -e  # Exit on any error
 
@@ -344,13 +344,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub - Simplified independent process"""
+        """Update the controller script from GitHub - No interruption version"""
         try:
             current_time = self._get_current_time()
             
-            # Create a robust update script that detaches itself
+            # Create an update script that completes regardless of interruptions
             update_script = '''#!/bin/bash
-# Simple but effective detachment
+# Detach completely and ignore all signals during update
+trap '' HUP INT QUIT TERM
+
+# Run in background with nohup for extra protection
 nohup bash -c '
     # Sleep to allow HTTP response to be sent
     sleep 5
@@ -367,11 +370,25 @@ nohup bash -c '
         echo "Download successful"
         chmod +x install-controller-proxy.sh
         echo "Executing new script..."
-        if ./install-controller-proxy.sh; then
+        
+        # Create a wrapper script that ignores interruptions
+        cat > /tmp/update-wrapper.sh << '"'"'WRAPPER_EOF'"'"'
+#!/bin/bash
+# Ignore all signals during installation
+trap '"'"''"'"' HUP INT QUIT TERM
+exec ./install-controller-proxy.sh
+WRAPPER_EOF
+        
+        chmod +x /tmp/update-wrapper.sh
+        
+        if /tmp/update-wrapper.sh; then
             echo "===== Update completed successfully: $(date) ====="
         else
             echo "===== Update script failed: $(date) ====="
         fi
+        
+        # Clean up wrapper
+        rm -f /tmp/update-wrapper.sh
     else
         echo "===== Download failed: $(date) ====="
     fi
@@ -393,7 +410,7 @@ exit 0
             # Make it executable
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Start the process simply with just background execution
+            # Start the process
             subprocess.Popen(['/bin/bash', '/tmp/update-controller.sh'], 
                            stdout=subprocess.DEVNULL, 
                            stderr=subprocess.DEVNULL,
@@ -404,12 +421,12 @@ exit 0
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started as independent background job.',
-                'stdout': 'Update initiated successfully with nohup detachment',
+                'output': 'Update process started with interruption protection.',
+                'stdout': 'Update initiated with signal protection',
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'notes': 'Update is running as detached nohup process. Check /tmp/update.log for progress. Service will restart automatically when complete.'
+                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
             
         except Exception as e:
