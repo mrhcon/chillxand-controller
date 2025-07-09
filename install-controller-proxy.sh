@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.26"
+CHILLXAND_VERSION="v1.0.27"
 
 set -e  # Exit on any error
 
@@ -124,7 +124,7 @@ ALLOWED_IPS = {
     '74.208.234.116',   # Master (USA)
     '85.215.145.173',   # Control2 (Germany)
     '194.164.163.124',  # Control3 (Spain)
-    '67.70.165.78',   # Home
+    '174.114.192.84',   # Home
     '127.0.0.1',        # Localhost
     '::1'               # IPv6 localhost
 }
@@ -381,20 +381,24 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub"""
+        """Update the controller script from GitHub - Fire and forget method"""
         try:
             current_time = self._get_current_time()
             
             # Create a temporary script to handle the update
             update_script = '''#!/bin/bash
 set -e
-echo "Starting controller update..."
+# Sleep to allow HTTP response to be sent first
+sleep 2
+echo "Starting controller update..." > /tmp/update.log 2>&1
 cd /tmp
-wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh
+wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh >> /tmp/update.log 2>&1
 chmod +x install-controller-proxy.sh
-echo "Downloaded new script, executing..."
-./install-controller-proxy.sh
-echo "Update completed successfully"
+echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
+./install-controller-proxy.sh >> /tmp/update.log 2>&1
+echo "Update completed successfully" >> /tmp/update.log 2>&1
+# Clean up
+rm -f /tmp/update-controller.sh
 '''
             
             # Write the update script
@@ -404,57 +408,38 @@ echo "Update completed successfully"
             # Make it executable
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Execute the update script
-            # This will replace the current script and restart the service
-            update_result = subprocess.run(['/tmp/update-controller.sh'], 
-                                         capture_output=True, text=True, timeout=120)
+            # Start the update process in the background (fire and forget)
+            subprocess.Popen(['/tmp/update-controller.sh'], 
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL,
+                           start_new_session=True)
             
-            # Combine stdout and stderr for complete output
-            combined_output = ""
-            if update_result.stdout:
-                combined_output += "STDOUT:\n" + update_result.stdout + "\n"
-            if update_result.stderr:
-                combined_output += "STDERR:\n" + update_result.stderr + "\n"
-            
-            # Always return success (200) but include all details
+            # Return immediately while update runs in background
             return {
                 'operation': 'controller_update',
-                'status': 'completed',
-                'return_code': update_result.returncode,
-                'success': update_result.returncode == 0,
-                'output': combined_output.strip() if combined_output.strip() else 'No output captured',
-                'stdout': update_result.stdout,
-                'stderr': update_result.stderr,
+                'status': 'initiated',
+                'return_code': 0,
+                'success': True,
+                'output': 'Update process started in background. Service will restart automatically.',
+                'stdout': 'Update initiated successfully',
+                'stderr': '',
                 'timestamp': current_time,
-                'message': 'Controller update completed successfully' if update_result.returncode == 0 else f'Controller update completed with return code {update_result.returncode}',
-                'notes': 'Update process executed. Check output and return_code for details.'
+                'message': 'Controller update initiated successfully',
+                'notes': 'Update is running in background. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
             
-        except subprocess.TimeoutExpired:
-            return {
-                'operation': 'controller_update',
-                'status': 'timeout',
-                'return_code': -1,
-                'success': False,
-                'output': 'Update operation timed out after 120 seconds',
-                'stdout': '',
-                'stderr': 'TimeoutExpired',
-                'timestamp': self._get_current_time(),
-                'message': 'Update timed out - check system manually',
-                'notes': 'Process was terminated due to timeout. Manual intervention may be required.'
-            }
         except Exception as e:
             return {
                 'operation': 'controller_update',
                 'status': 'error',
                 'return_code': -1,
                 'success': False,
-                'output': f'Exception occurred: {str(e)}',
+                'output': f'Failed to initiate update: {str(e)}',
                 'stdout': '',
                 'stderr': str(e),
                 'timestamp': self._get_current_time(),
-                'message': f'Update failed with error: {str(e)}',
-                'notes': 'An unexpected error occurred during the update process.'
+                'message': f'Update initiation failed: {str(e)}',
+                'notes': 'Failed to start the background update process.'
             }
         
     def _get_health_data(self):
@@ -984,8 +969,8 @@ setup_firewall() {
     log "Added rule for Control3 (Spain): 194.164.163.124"
     
     # Home
-    ufw allow from 67.70.165.78 to any port 3001 comment 'Home'
-    log "Added rule for Home: 67.70.165.78"
+    ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
+    log "Added rule for Home: 174.114.192.84"
     
     # Allow localhost access
     ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
@@ -1135,7 +1120,7 @@ show_completion_info() {
     echo "    * 74.208.234.116 (Master - USA)"
     echo "    * 85.215.145.173 (Control2 - Germany)"
     echo "    * 194.164.163.124 (Control3 - Spain)"
-    echo "    * 67.70.165.78 (Home)"
+    echo "    * 174.114.192.84 (Home)"
     echo "    * 127.0.0.1 (Localhost)"
     echo "  - All other IPs will receive 403 Forbidden"
     echo "  - UFW Firewall: Configured with IP restrictions"
