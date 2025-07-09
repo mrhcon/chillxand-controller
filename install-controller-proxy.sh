@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.42"
+CHILLXAND_VERSION="v1.0.43"
 
 set -e  # Exit on any error
 
@@ -43,12 +43,12 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    # Try multiple approaches for apt-get update (more script-friendly than apt)
-    if ! apt-get update; then
+    # Try multiple approaches for apt-get update (suppress warnings)
+    if ! apt-get update 2>/dev/null; then
         warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
-        if ! apt-get update --allow-unauthenticated; then
+        if ! apt-get update --allow-unauthenticated 2>/dev/null; then
             warn "Apt-get update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
-            if ! apt-get update --allow-releaseinfo-change; then
+            if ! apt-get update --allow-releaseinfo-change 2>/dev/null; then
                 warn "All apt-get update attempts failed, continuing anyway..."
                 warn "Some packages may not be available or up to date"
             fi
@@ -56,11 +56,11 @@ install_dependencies() {
     fi
 
     log "Installing required packages..."
-    # Install packages one by one with fallbacks using apt-get
+    # Install packages one by one with fallbacks using apt-get (suppress warnings)
     for package in ufw python3 python3-pip net-tools curl; do
-        if ! apt-get install -y "$package"; then
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y "$package" 2>/dev/null; then
             warn "Failed to install $package via apt-get, trying with --allow-unauthenticated..."
-            if ! apt-get install -y --allow-unauthenticated "$package"; then
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated "$package" 2>/dev/null; then
                 if [[ "$package" == "net-tools" ]]; then
                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
                 elif [[ "$package" == "ufw" ]]; then
@@ -78,21 +78,21 @@ install_dependencies() {
     done
 
     log "Installing Python requests module..."
-    # Try to install python3-requests via apt-get first (preferred method)
-    if apt-get install -y python3-requests; then
+    # Try to install python3-requests via apt-get first (suppress warnings)
+    if DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-requests 2>/dev/null; then
         log "Successfully installed python3-requests via apt-get"
-    elif apt-get install -y --allow-unauthenticated python3-requests; then
+    elif DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated python3-requests 2>/dev/null; then
         log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
     else
         warn "Failed to install python3-requests via apt-get, trying pip..."
         # Try different pip installation methods
-        if pip3 install requests; then
+        if pip3 install requests >/dev/null 2>&1; then
             log "Successfully installed requests via pip3"
-        elif pip3 install --break-system-packages requests; then
+        elif pip3 install --break-system-packages requests >/dev/null 2>&1; then
             log "Successfully installed requests via pip3 (with --break-system-packages)"
-        elif python3 -m pip install requests; then
+        elif python3 -m pip install requests >/dev/null 2>&1; then
             log "Successfully installed requests via python3 -m pip"
-        elif python3 -m pip install --break-system-packages requests; then
+        elif python3 -m pip install --break-system-packages requests >/dev/null 2>&1; then
             log "Successfully installed requests via python3 -m pip (with --break-system-packages)"
         else
             error "Failed to install requests module through all methods"
@@ -454,6 +454,7 @@ exit 0
                     'operation': 'get_update_log',
                     'status': 'no_log',
                     'success': True,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
                     'log_content': '',
                     'log_lines': [],
                     'file_size': 0,
@@ -486,6 +487,7 @@ exit 0
                     'operation': 'get_update_log',
                     'status': status,
                     'success': True,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
                     'log_content': log_content,
                     'log_lines': log_lines,
                     'line_count': len(log_lines),
@@ -501,6 +503,7 @@ exit 0
                     'operation': 'get_update_log',
                     'status': 'read_error',
                     'success': False,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
                     'log_content': '',
                     'log_lines': [],
                     'file_size': file_size,
@@ -516,6 +519,7 @@ exit 0
                 'operation': 'get_update_log',
                 'status': 'error',
                 'success': False,
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
                 'log_content': '',
                 'log_lines': [],
                 'error': str(e),
