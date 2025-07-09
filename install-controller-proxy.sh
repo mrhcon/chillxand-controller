@@ -1,10 +1,902 @@
+#!/usr/bin/env python3
+import http.server
+import socketserver
+import requests
+import sys
+import subprocess
+import json
+import os
+from datetime import datetime
+
+# ChillXand Controller Version
+CHILLXAND_CONTROLLER_VERSION = "v1.0.50"
+
+# Allowed IP addresses - WHITELIST ONLY
+ALLOWED_IPS = {
+    '74.208.234.116',   # Master (USA)
+    '85.215.145.173',   # Control2 (Germany)
+    '194.164.163.124',  # Control3 (Spain)
+    '174.114.192.84',   # Home (add your actual IP here)
+    '67.70.165.78',     # Home (secondary IP)
+    '127.0.0.1'         # Localhost
+}
+
+class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
+    def _check_ip_allowed(self):
+        """Check if the client IP is in the allowed list"""
+        client_ip = self.client_address[0]
+        
+        # Handle IPv6-mapped IPv4 addresses
+        if client_ip.startswith('::ffff:'):
+            client_ip = client_ip[7:]  # Remove ::ffff: prefix
+        
+        if client_ip not in ALLOWED_IPS:
+            self.send_error(403, f"Access forbidden from IP: {client_ip}")
+            return False
+        return True
+    
+    def _set_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Max-Age', '86400')
+    
+    def do_OPTIONS(self):
+        if not self._check_ip_allowed():
+            return
+            
+        self.send_response(200)
+        self._set_cors_headers()
+        self.end_headers()
+    
+    def _get_server_ip(self):
+        """Get the server's IP address"""
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return "localhost"
+    
+    def _get_current_time(self):
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    def _get_service_status(self, service_name):
+        try:
+            result = subprocess.run(['systemctl', 'status', service_name], capture_output=True, text=True, timeout=10)
+            is_active = subprocess.run(['systemctl', 'is-active', service_name], capture_output=True, text=True, timeout=5).stdout.strip()
+            is_enabled = subprocess.run(['systemctl', 'is-enabled', service_name], capture_output=True, text=True, timeout=5).stdout.strip()
+            
+            status_messages = []
+            if result.stdout:
+                for line in result.stdout.strip().split('\n'):
+                    if line.strip():
+                        status_messages.append(line)
+            
+            return {
+                'service': service_name,
+                'active': is_active,
+                'enabled': is_enabled,
+                'status_messages': status_messages,
+                'return_code': result.returncode,
+                'timestamp': self._get_current_time()
+            }
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': str(e),
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': [],
+                'timestamp': self._get_current_time()
+            }
+    
+    def _get_network_stats(self):
+        try:
+            network_stats = {}
+            with open('/proc/net/dev', 'r') as f:
+                lines = f.readlines()
+                
+            for line in lines[2:]:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    interface = parts[0].strip()
+                    if interface == 'lo':
+                        continue
+                        
+                    stats = parts[1].split()
+                    if len(stats) >= 16:
+                        bytes_received = int(stats[0])
+                        packets_received = int(stats[1])
+                        bytes_transmitted = int(stats[8])
+                        packets_transmitted = int(stats[9])
+                        
+                        network_stats[interface] = {
+                            'bytes_received': bytes_received,
+                            'packets_received': packets_received,
+                            'bytes_transmitted': bytes_transmitted,
+                            'packets_transmitted': packets_transmitted,
+                            'total_bytes': bytes_received + bytes_transmitted,
+                            'total_packets': packets_received + packets_transmitted
+                        }
+                        
+            return network_stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _get_stats_data(self):
+        try:
+            response = requests.get('http://localhost:80/stats', timeout=5)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {'error': f'HTTP {response.status_code}'}
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def _get_versions_data(self):
+        try:
+            response = requests.get('http://localhost:4000/versions', timeout=5)
+            if response.status_code == 200:
+                upstream_versions = response.json()
+                
+                # Add our proxy version to the versions response
+                if isinstance(upstream_versions, dict):
+                    if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
+                        upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                    else:
+                        upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                else:
+                    upstream_versions = {
+                        'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                        'upstream_data': upstream_versions
+                    }
+            else:
+                upstream_versions = {
+                    'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                    'upstream_error': f'HTTP {response.status_code}'
+                }
+        except Exception as e:
+            upstream_versions = {
+                'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                'upstream_error': str(e)
+            }
+        
+        return upstream_versions
+    
+    def _get_summary_data(self):
+        summary = {
+            'timestamp': self._get_current_time(),
+            'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+            'security': {
+                'ip_whitelisting': 'enabled',
+                'allowed_ips': list(ALLOWED_IPS),
+                'client_ip': self.client_address[0]
+            },
+            'stats': self._get_stats_data(),
+            'versions': self._get_versions_data(),
+            'services': {
+                'pod': self._get_service_status('pod.service'),
+                'xandminer': self._get_service_status('xandminer.service'),
+                'xandminerd': self._get_service_status('xandminerd.service')
+            }
+        }
+        return summary
+    
+    def _restart_pod_service(self):
+        try:
+            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
+                                          capture_output=True, text=True, timeout=10)
+            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status('pod.service')
+            status_data['restart_operation'] = {
+                'symlink_created': symlink_result.returncode == 0,
+                'restart_success': restart_result.returncode == 0,
+                'symlink_error': symlink_result.stderr if symlink_result.stderr else None,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': 'pod.service',
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
+    
+    def _restart_service(self, service_name):
+        try:
+            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
+                                          capture_output=True, text=True, timeout=30)
+            
+            status_data = self._get_service_status(service_name)
+            status_data['restart_operation'] = {
+                'restart_success': restart_result.returncode == 0,
+                'restart_error': restart_result.stderr if restart_result.stderr else None,
+                'timestamp': self._get_current_time()
+            }
+            
+            return status_data
+            
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': f'Restart operation failed: {str(e)}',
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': []
+            }
+    
+    def _compare_versions(self, current_version, new_version):
+        """Compare two version strings (e.g., v1.0.26 vs v1.0.27)"""
+        try:
+            # Remove 'v' prefix and split by dots
+            current_parts = current_version.lstrip('v').split('.')
+            new_parts = new_version.lstrip('v').split('.')
+            
+            # Pad shorter version with zeros
+            max_len = max(len(current_parts), len(new_parts))
+            current_parts += ['0'] * (max_len - len(current_parts))
+            new_parts += ['0'] * (max_len - len(new_parts))
+            
+            # Compare each part as integers
+            for i in range(max_len):
+                current_num = int(current_parts[i])
+                new_num = int(new_parts[i])
+                
+                if new_num > current_num:
+                    return 1  # New version is higher
+                elif new_num < current_num:
+                    return -1  # New version is lower
+            
+            return 0  # Versions are equal
+            
+        except (ValueError, IndexError) as e:
+            # If version parsing fails, assume update is needed
+            return 1
+    
+    def _get_new_script_version(self, script_path):
+        """Extract version from downloaded script"""
+        try:
+            with open(script_path, 'r') as f:
+                content = f.read()
+                
+            # Look for CHILLXAND_VERSION line
+            for line in content.split('\n'):
+                if line.strip().startswith('CHILLXAND_VERSION='):
+                    # Extract version from line like: CHILLXAND_VERSION="v1.0.27"
+                    version = line.split('=')[1].strip().strip('"').strip("'")
+                    return version
+                    
+            return None
+            
+        except Exception as e:
+            return None
+    
+    def _update_controller(self):
+        """Update the controller script from GitHub with version checking"""
+        try:
+            current_time = self._get_current_time()
+            current_version = CHILLXAND_CONTROLLER_VERSION
+            
+            # Create an update script that checks versions before updating
+            update_script = f'''#!/bin/bash
+# Detach completely and ignore all signals during update
+trap '' HUP INT QUIT TERM
+
+# Run in background with nohup for extra protection
+nohup bash -c '
+    # Sleep to allow HTTP response to be sent
+    sleep 5
+    
+    # Log everything to update.log
+    exec >> /tmp/update.log 2>&1
+    
+    echo "===== Controller Update Started: $(date) ====="
+    echo "Current version: {current_version}"
+    echo "Starting controller update..."
+    
+    cd /tmp
+    echo "Downloading new script..."
+    if wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
+        echo "Download successful"
+        chmod +x install-controller-proxy.sh
+        
+        # Extract version from downloaded script
+        NEW_VERSION=$(grep "^CHILLXAND_VERSION=" install-controller-proxy.sh | head -1 | cut -d'"'"'"'"' -f2)
+        echo "Downloaded version: $NEW_VERSION"
+        
+        # Create Python script to compare versions
+        cat > /tmp/version_compare.py << '"'"'VERSION_EOF'"'"'
+import sys
+
+def compare_versions(current, new):
+    try:
+        current_parts = current.lstrip("v").split(".")
+        new_parts = new.lstrip("v").split(".")
+        
+        max_len = max(len(current_parts), len(new_parts))
+        current_parts += ["0"] * (max_len - len(current_parts))
+        new_parts += ["0"] * (max_len - len(new_parts))
+        
+        for i in range(max_len):
+            current_num = int(current_parts[i])
+            new_num = int(new_parts[i])
+            
+            if new_num > current_num:
+                return 1
+            elif new_num < current_num:
+                return -1
+        return 0
+    except:
+        return 1
+
+current = sys.argv[1] if len(sys.argv) > 1 else ""
+new = sys.argv[2] if len(sys.argv) > 2 else ""
+result = compare_versions(current, new)
+print(result)
+VERSION_EOF
+        
+        # Compare versions
+        COMPARISON=$(python3 /tmp/version_compare.py "{current_version}" "$NEW_VERSION")
+        
+        if [ "$COMPARISON" = "1" ]; then
+            echo "New version available: $NEW_VERSION > {current_version}"
+            echo "Proceeding with update..."
+            
+            # Create a wrapper script that ignores interruptions
+            cat > /tmp/update-wrapper.sh << '"'"'WRAPPER_EOF'"'"'
 #!/bin/bash
+# Ignore all signals during installation
+trap '"'"''"'"' HUP INT QUIT TERM
+exec ./install-controller-proxy.sh
+WRAPPER_EOF
+            
+            chmod +x /tmp/update-wrapper.sh
+            
+            if /tmp/update-wrapper.sh; then
+                echo "===== Update completed successfully: $(date) ====="
+                echo "Updated from {current_version} to $NEW_VERSION"
+            else
+                echo "===== Update script failed: $(date) ====="
+            fi
+            
+            # Clean up wrapper
+            rm -f /tmp/update-wrapper.sh
+            
+        elif [ "$COMPARISON" = "0" ]; then
+            echo "Same version detected: $NEW_VERSION = {current_version}"
+            echo "No update needed - versions are identical"
+            echo "===== Update skipped - already current: $(date) ====="
+        else
+            echo "Downgrade detected: $NEW_VERSION < {current_version}"
+            echo "Refusing to downgrade from {current_version} to $NEW_VERSION"
+            echo "===== Update refused - would be downgrade: $(date) ====="
+        fi
+        
+        # Clean up version comparison script
+        rm -f /tmp/version_compare.py
+        
+    else
+        echo "===== Download failed: $(date) ====="
+    fi
+    
+    # Clean up
+    rm -f /tmp/update-controller.sh
+    echo "Cleanup completed"
+    
+' >/dev/null 2>&1 &
+
+# Exit immediately
+exit 0
+'''
+            
+            # Write the update script
+            with open('/tmp/update-controller.sh', 'w') as f:
+                f.write(update_script)
+            
+            # Make it executable
+            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+            
+            # Start the process
+            subprocess.Popen(['/bin/bash', '/tmp/update-controller.sh'], 
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL,
+                           stdin=subprocess.DEVNULL)
+            
+            return {
+                'operation': 'controller_update',
+                'status': 'initiated',
+                'return_code': 0,
+                'success': True,
+                'current_version': current_version,
+                'output': 'Update process started with version checking and interruption protection.',
+                'stdout': 'Update initiated with version comparison',
+                'stderr': '',
+                'timestamp': current_time,
+                'message': 'Controller update initiated with version checking',
+                'notes': f'Current version: {current_version}. Update will only proceed if newer version is available.'
+            }
+            
+        except Exception as e:
+            return {
+                'operation': 'controller_update',
+                'status': 'error',
+                'return_code': -1,
+                'success': False,
+                'current_version': CHILLXAND_CONTROLLER_VERSION,
+                'output': f'Failed to initiate update: {str(e)}',
+                'stdout': '',
+                'stderr': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Update initiation failed: {str(e)}',
+                'notes': 'Failed to start the background update process.'
+            }
+    
+    def _get_update_log(self):
+        """Get the contents of the update log file"""
+        try:
+            current_time = self._get_current_time()
+            log_file = '/tmp/update.log'
+            
+            if not os.path.exists(log_file):
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'no_log',
+                    'success': True,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': 0,
+                    'last_modified': None,
+                    'timestamp': current_time,
+                    'message': 'No update log file found',
+                    'notes': 'Update log will be created when an update is initiated.'
+                }
+            
+            stat = os.stat(log_file)
+            file_size = stat.st_size
+            last_modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+                
+                log_lines = log_content.strip().split('\n') if log_content.strip() else []
+                
+                if 'Update completed successfully' in log_content:
+                    status = 'completed_success'
+                elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    status = 'completed_error'
+                elif log_content.strip():
+                    status = 'in_progress'
+                else:
+                    status = 'empty'
+                
+                return {
+                    'operation': 'get_update_log',
+                    'status': status,
+                    'success': True,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                    'log_content': log_content,
+                    'log_lines': log_lines,
+                    'line_count': len(log_lines),
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'timestamp': current_time,
+                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
+                    'notes': f'Log file last modified: {last_modified}'
+                }
+                
+            except Exception as read_error:
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'read_error',
+                    'success': False,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'error': str(read_error),
+                    'timestamp': current_time,
+                    'message': f'Failed to read update log: {str(read_error)}',
+                    'notes': 'Log file exists but could not be read.'
+                }
+                
+        except Exception as e:
+            return {
+                'operation': 'get_update_log',
+                'status': 'error',
+                'success': False,
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                'log_content': '',
+                'log_lines': [],
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Failed to access update log: {str(e)}',
+                'notes': 'An error occurred while trying to access the log file.'
+            }
+    
+    def _get_health_data(self):
+        current_time = self._get_current_time()
+        server_ip = self._get_server_ip()
+        
+        health_data = {
+            'status': 'pass',
+            'version': '1',
+            'serviceId': 'xandeum-node',
+            'description': 'Xandeum Node Health Check',
+            'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+            'timestamp': current_time,
+            'security': {
+                'ip_whitelisting': 'enabled',
+                'allowed_ips': list(ALLOWED_IPS),
+                'client_ip': self.client_address[0]
+            },
+            'checks': {},
+            'links': {
+                'stats': f'http://{server_ip}:3001/stats',
+                'versions': f'http://{server_ip}:3001/versions',
+                'summary': f'http://{server_ip}:3001/summary',
+                'status_pod': f'http://{server_ip}:3001/status/pod',
+                'status_xandminer': f'http://{server_ip}:3001/status/xandminer',
+                'status_xandminerd': f'http://{server_ip}:3001/status/xandminerd',
+                'restart_pod': f'http://{server_ip}:3001/restart/pod',
+                'restart_xandminer': f'http://{server_ip}:3001/restart/xandminer',
+                'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd',
+                'update_controller': f'http://{server_ip}:3001/update/controller',
+                'update_controller_log': f'http://{server_ip}:3001/update/controller/log'
+            }
+        }
+        
+        overall_status = 'pass'
+        
+        # CPU monitoring
+        try:
+            with open('/proc/loadavg', 'r') as f:
+                load_avg = f.read().strip().split()
+                load_1min = float(load_avg[0])
+                
+            cpu_count = os.cpu_count() or 1
+            load_per_cpu = load_1min / cpu_count
+            
+            if load_per_cpu > 2.0:
+                cpu_status = 'fail'
+                overall_status = 'fail'
+            elif load_per_cpu > 1.0:
+                cpu_status = 'warn'
+                if overall_status == 'pass':
+                    overall_status = 'warn'
+            else:
+                cpu_status = 'pass'
+                
+            health_data['checks']['system:cpu'] = {
+                'status': cpu_status,
+                'observedValue': load_1min,
+                'observedUnit': 'load_average',
+                'load_per_cpu': round(load_per_cpu, 2),
+                'time': current_time
+            }
+            
+        except Exception as e:
+            health_data['checks']['system:cpu'] = {
+                'status': 'fail',
+                'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        # Memory monitoring
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                meminfo = f.read()
+                
+            mem_total = None
+            mem_available = None
+            swap_total = None
+            swap_free = None
+            
+            for line in meminfo.split('\n'):
+                if line.startswith('MemTotal:'):
+                    mem_total = int(line.split()[1]) * 1024
+                elif line.startswith('MemAvailable:'):
+                    mem_available = int(line.split()[1]) * 1024
+                elif line.startswith('SwapTotal:'):
+                    swap_total = int(line.split()[1]) * 1024
+                elif line.startswith('SwapFree:'):
+                    swap_free = int(line.split()[1]) * 1024
+                    
+            if mem_total and mem_available:
+                mem_used_percent = ((mem_total - mem_available) / mem_total) * 100
+                mem_used_bytes = mem_total - mem_available
+                
+                if mem_used_percent > 95:
+                    mem_status = 'fail'
+                    overall_status = 'fail'
+                elif mem_used_percent > 85:
+                    mem_status = 'warn'
+                    if overall_status == 'pass':
+                        overall_status = 'warn'
+                else:
+                    mem_status = 'pass'
+                    
+                memory_check = {
+                    'status': mem_status,
+                    'observedValue': round(mem_used_percent, 1),
+                    'observedUnit': 'percent_used',
+                    'time': current_time,
+                    'memory_total_bytes': mem_total,
+                    'memory_used_bytes': mem_used_bytes,
+                    'memory_available_bytes': mem_available
+                }
+                
+                if swap_total is not None and swap_free is not None:
+                    swap_used = swap_total - swap_free
+                    swap_used_percent = (swap_used / swap_total * 100) if swap_total > 0 else 0
+                    memory_check['swap_total_bytes'] = swap_total
+                    memory_check['swap_used_bytes'] = swap_used
+                    memory_check['swap_used_percent'] = round(swap_used_percent, 1)
+                
+                health_data['checks']['system:memory'] = memory_check
+            
+        except Exception as e:
+            health_data['checks']['system:memory'] = {
+                'status': 'fail',
+                'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        # Network monitoring
+        try:
+            network_stats = self._get_network_stats()
+            
+            if 'error' not in network_stats and network_stats:
+                total_bytes_received = 0
+                total_bytes_transmitted = 0
+                total_packets_received = 0
+                total_packets_transmitted = 0
+                interface_count = 0
+                
+                for interface, stats in network_stats.items():
+                    total_bytes_received += stats['bytes_received']
+                    total_bytes_transmitted += stats['bytes_transmitted']
+                    total_packets_received += stats['packets_received']
+                    total_packets_transmitted += stats['packets_transmitted']
+                    interface_count += 1
+                
+                total_bytes = total_bytes_received + total_bytes_transmitted
+                total_packets = total_packets_received + total_packets_transmitted
+                
+                if interface_count == 0:
+                    net_status = 'warn'
+                    if overall_status == 'pass':
+                        overall_status = 'warn'
+                else:
+                    net_status = 'pass'
+                
+                health_data['checks']['system:network'] = {
+                    'status': net_status,
+                    'time': current_time,
+                    'active_interfaces': interface_count,
+                    'total_bytes_received': total_bytes_received,
+                    'total_bytes_transmitted': total_bytes_transmitted,
+                    'total_bytes_transferred': total_bytes,
+                    'total_packets_received': total_packets_received,
+                    'total_packets_transmitted': total_packets_transmitted,
+                    'total_packets': total_packets,
+                    'interfaces': network_stats
+                }
+            else:
+                health_data['checks']['system:network'] = {
+                    'status': 'fail',
+                    'output': network_stats.get('error', 'Unknown network error')
+                }
+                overall_status = 'fail'
+                
+        except Exception as e:
+            health_data['checks']['system:network'] = {
+                'status': 'fail',
+                'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        # Service checks
+        services = ['pod.service', 'xandminer.service', 'xandminerd.service']
+        for service in services:
+            try:
+                is_active = subprocess.run(['systemctl', 'is-active', service], 
+                                         capture_output=True, text=True, timeout=5).stdout.strip()
+                
+                service_name = service.replace('.service', '')
+                if is_active == 'active':
+                    service_status = 'pass'
+                elif is_active == 'inactive':
+                    service_status = 'warn'
+                    if overall_status == 'pass':
+                        overall_status = 'warn'
+                else:
+                    service_status = 'fail'
+                    overall_status = 'fail'
+                    
+                health_data['checks'][f'service:{service_name}'] = {
+                    'status': service_status,
+                    'observedValue': is_active,
+                    'time': current_time
+                }
+                
+            except Exception as e:
+                health_data['checks'][f'service:{service_name}'] = {
+                    'status': 'fail',
+                    'output': str(e)
+                }
+                overall_status = 'fail'
+        
+        # Application endpoint checks
+        try:
+            response = requests.get('http://localhost:80/stats', timeout=5)
+            if response.status_code == 200:
+                app_status = 'pass'
+            else:
+                app_status = 'fail'
+                overall_status = 'fail'
+                
+            health_data['checks']['app:stats'] = {
+                'status': app_status,
+                'observedValue': response.status_code,
+                'time': current_time
+            }
+            
+        except Exception as e:
+            health_data['checks']['app:stats'] = {
+                'status': 'fail',
+                'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        try:
+            response = requests.get('http://localhost:4000/versions', timeout=5)
+            if response.status_code == 200:
+                versions_status = 'pass'
+            else:
+                versions_status = 'fail'
+                overall_status = 'fail'
+                
+            health_data['checks']['app:versions'] = {
+        try:
+            response = requests.get('http://localhost:4000/versions', timeout=5)
+            if response.status_code == 200:
+                versions_status = 'pass'
+            else:
+                versions_status = 'fail'
+                overall_status = 'fail'
+                
+            health_data['checks']['app:versions'] = {
+                'status': versions_status,
+                'observedValue': response.status_code,
+                'time': current_time
+            }
+            
+        except Exception as e:
+            health_data['checks']['app:versions'] = {
+                'status': 'fail',
+                'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        health_data['status'] = overall_status
+        return health_data
+    
+    def _send_json_response(self, data, status_code=200):
+        self.send_response(status_code)
+        self.send_header('Content-type', 'application/json')
+        self._set_cors_headers()
+        self.end_headers()
+        json_response = json.dumps(data, indent=2)
+        self.wfile.write(json_response.encode('utf-8'))
+    
+    def do_GET(self):
+        if not self._check_ip_allowed():
+            return
+            
+        try:
+            if self.path == '/status/pod':
+                status_data = self._get_service_status('pod.service')
+                self._send_json_response(status_data)
+                
+            elif self.path == '/status/xandminer':
+                status_data = self._get_service_status('xandminer.service')
+                self._send_json_response(status_data)
+                
+            elif self.path == '/status/xandminerd':
+                status_data = self._get_service_status('xandminerd.service')
+                self._send_json_response(status_data)
+                
+            elif self.path == '/health':
+                health_data = self._get_health_data()
+                if health_data['status'] == 'pass':
+                    http_status = 200
+                elif health_data['status'] == 'warn':
+                    http_status = 200
+                else:
+                    http_status = 503
+                self._send_json_response(health_data, http_status)
+                
+            elif self.path == '/summary':
+                summary_data = self._get_summary_data()
+                self._send_json_response(summary_data)
+                
+            elif self.path == '/stats':
+                response = requests.get('http://localhost:80/stats', timeout=10)
+                self.send_response(response.status_code)
+                self.send_header('Content-type', 'application/json')
+                self._set_cors_headers()
+                self.end_headers()
+                self.wfile.write(response.content)
+                
+            elif self.path == '/versions':
+                versions_data = self._get_versions_data()
+                self._send_json_response(versions_data)
+                
+            elif self.path == '/restart/pod':
+                status_data = self._restart_pod_service()
+                self._send_json_response(status_data)
+                
+            elif self.path == '/restart/xandminer':
+                status_data = self._restart_service('xandminer.service')
+                self._send_json_response(status_data)
+                    
+            elif self.path == '/restart/xandminerd':
+                status_data = self._restart_service('xandminerd.service')
+                self._send_json_response(status_data)
+                    
+            elif self.path == '/update/controller':
+                update_data = self._update_controller()
+                self._send_json_response(update_data)
+                    
+            elif self.path == '/update/controller/log':
+                log_data = self._get_update_log()
+                self._send_json_response(log_data)
+                
+            else:
+                self.send_error(404, "Not Found")
+                
+        except Exception as e:
+            print(f"Error in do_GET for {self.path}: {e}")
+            self.send_error(500, str(e))
+    
+    def log_message(self, format, *args):
+        client_ip = self.client_address[0]
+        allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
+        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
+
+PORT = 3001
+if __name__ == "__main__":
+    try:
+        print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
+        print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
+        with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
+            print(f"JSON proxy serving on port {PORT}")
+            httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("Server stopped")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+        sys.exit(1)
+EOF#!/bin/bash
 
 # JSON Proxy Service Installation Script
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.47"
+CHILLXAND_VERSION="v1.0.26"
 
 set -e  # Exit on any error
 
