@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.71"
+CHILLXAND_VERSION="v1.0.72"
 
 set -e  # Exit on any error
 
@@ -43,7 +43,7 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    # Try multiple approaches for apt-get update (redirect stderr to suppress warnings)
+    # Try multiple approaches for apt-get update (suppress warnings)
     if ! apt-get update 2>/dev/null; then
         warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
         if ! apt-get update --allow-unauthenticated 2>/dev/null; then
@@ -56,7 +56,7 @@ install_dependencies() {
     fi
 
     log "Installing required packages..."
-    # Install packages one by one with fallbacks using apt-get (redirect stderr to suppress warnings)
+    # Install packages one by one with fallbacks using apt-get (suppress warnings)
     for package in ufw python3 python3-pip net-tools curl; do
         if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y "$package" 2>/dev/null; then
             warn "Failed to install $package via apt-get, trying with --allow-unauthenticated..."
@@ -78,7 +78,7 @@ install_dependencies() {
     done
 
     log "Installing Python requests module..."
-    # Try to install python3-requests via apt-get first (redirect stderr to suppress warnings)
+    # Try to install python3-requests via apt-get first (suppress warnings)
     if DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-requests 2>/dev/null; then
         log "Successfully installed python3-requests via apt-get"
     elif DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated python3-requests 2>/dev/null; then
@@ -169,7 +169,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return "localhost"
     
     def _get_current_time(self):
-        return datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -426,7 +426,8 @@ exit 0
                 'stderr': '',
                 'timestamp': current_time,
                 'message': 'Controller update initiated successfully',
-                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION
+                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress.'
             }
             
         except Exception as e:
@@ -869,7 +870,7 @@ exit 0
     def log_message(self, format, *args):
         client_ip = self.client_address[0]
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
+        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
 PORT = 3001
 if __name__ == "__main__":
@@ -925,72 +926,17 @@ setup_service() {
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    # Stop the service first if it's running
+    # Check if service is already running and restart if so, otherwise start fresh
     if systemctl is-active --quiet json-proxy.service; then
-        log "Stopping existing json-proxy service..."
-        systemctl stop json-proxy.service
-        
-        # Wait for the service to fully stop
-        log "Waiting for service to fully stop..."
-        for i in {1..10}; do
-            if ! systemctl is-active --quiet json-proxy.service; then
-                log "Service stopped successfully"
-                break
-            fi
-            log "Waiting for service to stop... (attempt $i/10)"
-            sleep 1
-        done
-        
-        # Force kill the service if it's still running
-        if systemctl is-active --quiet json-proxy.service; then
-            warn "Service still running, force killing..."
-            systemctl kill json-proxy.service
-            sleep 2
-        fi
-    fi
-    
-    # Now check what's using port 3001 and clean it up
-    log "Checking for processes using port 3001..."
-    if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-        warn "Port 3001 is still in use. Checking what's using it..."
-        port_info=$(ss -tlnp 2>/dev/null | grep ":3001 ")
-        echo "$port_info"
-        
-        # Extract PID from ss output and kill it
-        log "Attempting to free port 3001..."
-        pid=$(echo "$port_info" | grep -o 'pid=[0-9]*' | head -1 | cut -d'=' -f2)
-        if [[ -n "$pid" ]]; then
-            log "Found process with PID $pid using port 3001, killing it..."
-            kill -9 "$pid" 2>/dev/null || true
-            sleep 2
-        else
-            # Fallback methods
-            if command -v fuser &> /dev/null; then
-                fuser -k 3001/tcp 2>/dev/null || true
-            elif command -v lsof &> /dev/null; then
-                lsof -ti:3001 | xargs -r kill -9 2>/dev/null || true
-            else
-                warn "Could not extract PID and no fuser/lsof available"
-            fi
-            sleep 2
-        fi
-        
-        # Check again
-        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-            error "Could not free port 3001. Manual intervention may be required."
-            ss -tlnp 2>/dev/null | grep ":3001 " || true
-        else
-            log "Port 3001 is now free"
-        fi
+        log "Service is already running, restarting to pick up new script..."
+        systemctl restart json-proxy.service
     else
-        log "Port 3001 is free"
+        log "Starting json-proxy service..."
+        systemctl start json-proxy.service
     fi
-    
-    log "Starting json-proxy service..."
-    systemctl start json-proxy.service
     
     # Wait a moment for service to start
-    sleep 5
+    sleep 3
     
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
@@ -1002,25 +948,10 @@ setup_service() {
             start_time=$(ps -o lstart= -p "$service_pid" 2>/dev/null || echo "unknown")
             log "Service PID: $service_pid, Started: $start_time"
         fi
-        
-        # Verify port is actually listening
-        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-            log "Service is listening on port 3001"
-        else
-            warn "Service is running but may not be listening on port 3001"
-        fi
     else
         warn "Service may not be running properly"
         systemctl status json-proxy.service --no-pager
         warn "Check logs with: journalctl -u json-proxy.service -f"
-        
-        # Show recent logs to help debug
-        log "Recent service logs:"
-        journalctl -u json-proxy.service --no-pager -n 15
-        
-        # Show what's using port 3001 if anything
-        log "Current port 3001 usage:"
-        ss -tlnp 2>/dev/null | grep ":3001 " || log "No processes found using port 3001"
     fi
 }
 
