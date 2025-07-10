@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.66"
+CHILLXAND_VERSION="v1.0.67"
 
 set -e  # Exit on any error
 
@@ -925,32 +925,61 @@ setup_service() {
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    # Check if service is running and stop it first to avoid port conflicts
+    # First, check what's using port 3001 and clean it up
+    log "Checking for processes using port 3001..."
+    if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+        warn "Port 3001 is already in use. Checking what's using it..."
+        ss -tlnp 2>/dev/null | grep ":3001 " || true
+        
+        # Try to find and kill processes using port 3001
+        log "Attempting to free port 3001..."
+        if command -v fuser &> /dev/null; then
+            fuser -k 3001/tcp 2>/dev/null || true
+        else
+            # Alternative method using lsof if fuser is not available
+            if command -v lsof &> /dev/null; then
+                lsof -ti:3001 | xargs -r kill -9 2>/dev/null || true
+            else
+                warn "Neither fuser nor lsof available to kill processes on port 3001"
+            fi
+        fi
+        
+        # Wait for processes to die
+        sleep 3
+        
+        # Check again
+        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+            error "Could not free port 3001. Manual intervention may be required."
+            ss -tlnp 2>/dev/null | grep ":3001 " || true
+        else
+            log "Port 3001 is now free"
+        fi
+    fi
+    
+    # Stop the service if it's running
     if systemctl is-active --quiet json-proxy.service; then
-        log "Service is already running, stopping first to avoid port conflicts..."
+        log "Stopping existing json-proxy service..."
         systemctl stop json-proxy.service
         
-        # Wait for the service to fully stop and port to be released
-        log "Waiting for service to fully stop and port to be released..."
+        # Wait for the service to fully stop
+        log "Waiting for service to fully stop..."
         for i in {1..10}; do
             if ! systemctl is-active --quiet json-proxy.service; then
-                # Double check that port 3001 is actually free
-                if ! ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-                    log "Service stopped and port 3001 is now free"
-                    break
-                fi
+                log "Service stopped successfully"
+                break
             fi
             log "Waiting for service to stop... (attempt $i/10)"
-            sleep 2
+            sleep 1
         done
-        
-        # Final check - if port is still in use, try to kill processes using it
-        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
-            warn "Port 3001 still in use after stopping service, attempting to kill processes..."
-            # Kill any process using port 3001
+    fi
+    
+    # Final port check and cleanup before starting
+    if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+        warn "Port 3001 still in use, making final attempt to free it..."
+        if command -v fuser &> /dev/null; then
             fuser -k 3001/tcp 2>/dev/null || true
-            sleep 2
         fi
+        sleep 2
     fi
     
     log "Starting json-proxy service..."
@@ -983,7 +1012,11 @@ setup_service() {
         
         # Show recent logs to help debug
         log "Recent service logs:"
-        journalctl -u json-proxy.service --no-pager -n 10
+        journalctl -u json-proxy.service --no-pager -n 15
+        
+        # Show what's using port 3001 if anything
+        log "Current port 3001 usage:"
+        ss -tlnp 2>/dev/null | grep ":3001 " || log "No processes found using port 3001"
     fi
 }
 
