@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.63"
+CHILLXAND_VERSION="v1.0.65"
 
 set -e  # Exit on any error
 
@@ -925,17 +925,39 @@ setup_service() {
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    # Check if service is already running and restart if so, otherwise start fresh
+    # Check if service is running and stop it first to avoid port conflicts
     if systemctl is-active --quiet json-proxy.service; then
-        log "Service is already running, restarting to pick up new script..."
-        systemctl restart json-proxy.service
-    else
-        log "Starting json-proxy service..."
-        systemctl start json-proxy.service
+        log "Service is already running, stopping first to avoid port conflicts..."
+        systemctl stop json-proxy.service
+        
+        # Wait for the service to fully stop and port to be released
+        log "Waiting for service to fully stop and port to be released..."
+        for i in {1..10}; do
+            if ! systemctl is-active --quiet json-proxy.service; then
+                # Double check that port 3001 is actually free
+                if ! ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+                    log "Service stopped and port 3001 is now free"
+                    break
+                fi
+            fi
+            log "Waiting for service to stop... (attempt $i/10)"
+            sleep 2
+        done
+        
+        # Final check - if port is still in use, try to kill processes using it
+        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+            warn "Port 3001 still in use after stopping service, attempting to kill processes..."
+            # Kill any process using port 3001
+            fuser -k 3001/tcp 2>/dev/null || true
+            sleep 2
+        fi
     fi
     
+    log "Starting json-proxy service..."
+    systemctl start json-proxy.service
+    
     # Wait a moment for service to start
-    sleep 3
+    sleep 5
     
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
@@ -947,10 +969,21 @@ setup_service() {
             start_time=$(ps -o lstart= -p "$service_pid" 2>/dev/null || echo "unknown")
             log "Service PID: $service_pid, Started: $start_time"
         fi
+        
+        # Verify port is actually listening
+        if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+            log "Service is listening on port 3001"
+        else
+            warn "Service is running but may not be listening on port 3001"
+        fi
     else
         warn "Service may not be running properly"
         systemctl status json-proxy.service --no-pager
         warn "Check logs with: journalctl -u json-proxy.service -f"
+        
+        # Show recent logs to help debug
+        log "Recent service logs:"
+        journalctl -u json-proxy.service --no-pager -n 10
     fi
 }
 
