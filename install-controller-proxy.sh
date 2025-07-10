@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.69"
+CHILLXAND_VERSION="v1.0.70"
 
 set -e  # Exit on any error
 
@@ -169,7 +169,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return "localhost"
     
     def _get_current_time(self):
-        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        return datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -869,7 +869,7 @@ exit 0
     def log_message(self, format, *args):
         client_ip = self.client_address[0]
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
-        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
 PORT = 3001
 if __name__ == "__main__":
