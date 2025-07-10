@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.77"
+CHILLXAND_VERSION="v1.0.78"
 
 set -e  # Exit on any error
 
@@ -344,190 +344,91 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub - Improved version with better isolation"""
+        """Update the controller script from GitHub - No interruption version"""
         try:
             current_time = self._get_current_time()
             
-            # Create a more robust update script with better error handling and logging
+            # Create an update script that completes regardless of interruptions
             update_script = '''#!/bin/bash
+# Detach completely and ignore all signals during update
+trap '' HUP INT QUIT TERM
 
-# Update Controller Script - Isolated Version
-# This script runs completely isolated from the parent process
-
-# Create a new session and process group to fully isolate from parent
-setsid bash -c '
-
-# Set up comprehensive logging
-exec > >(tee -a /tmp/update.log) 2>&1
-
-echo "===== Controller Update Started: $(date) ====="
-echo "Process isolation: PID=$$, PPID=$PPID, SID=$(ps -o sid= -p $$)"
-
-# Function to log with timestamps
-log_msg() {
-    echo "[$(date "+%Y-%m-%d %H:%M:%S")] $1"
-}
-
-# Error handling function
-handle_error() {
-    local exit_code=$?
-    log_msg "ERROR: Command failed with exit code $exit_code: $1"
-    return $exit_code
-}
-
-# Set error handling
-set -e
-trap '\''handle_error "Line $LINENO"'\'' ERR
-
-log_msg "Starting controller update process..."
-log_msg "Current working directory: $(pwd)"
-log_msg "User: $(whoami)"
-
-# Change to temp directory
-cd /tmp || { log_msg "ERROR: Failed to change to /tmp directory"; exit 1; }
-log_msg "Changed to directory: $(pwd)"
-
-# Clean up any existing files
-log_msg "Cleaning up existing files..."
-rm -f install-controller-proxy.sh install-controller-proxy.sh.*
-
-log_msg "Downloading new controller script..."
-if wget -v -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" 2>&1; then
-    log_msg "Download completed successfully"
+# Run in background with nohup for extra protection
+nohup bash -c '
+    # Sleep to allow HTTP response to be sent
+    sleep 5
     
-    # Verify file was downloaded and has content
-    if [[ ! -f "install-controller-proxy.sh" ]]; then
-        log_msg "ERROR: Downloaded file does not exist"
-        exit 1
-    fi
+    # Log everything to update.log
+    exec >> /tmp/update.log 2>&1
     
-    file_size=$(stat -f%z install-controller-proxy.sh 2>/dev/null || stat -c%s install-controller-proxy.sh 2>/dev/null || echo "unknown")
-    log_msg "Downloaded file size: $file_size bytes"
+    echo "===== Controller Update Started: $(date) ====="
+    echo "Starting controller update..."
     
-    if [[ "$file_size" == "0" ]] || [[ "$file_size" == "unknown" ]]; then
-        log_msg "ERROR: Downloaded file appears to be empty or unreadable"
-        exit 1
-    fi
-    
-    # Make executable
-    chmod +x install-controller-proxy.sh || { log_msg "ERROR: Failed to make script executable"; exit 1; }
-    log_msg "Made script executable"
-    
-    # Show first few lines to verify content
-    log_msg "Script content preview:"
-    head -10 install-controller-proxy.sh | while read line; do
-        log_msg "  $line"
-    done
-    
-    log_msg "Executing installation script..."
-    
-    # Execute with explicit bash and comprehensive logging
-    if bash -x ./install-controller-proxy.sh 2>&1; then
-        log_msg "===== Update completed successfully: $(date) ====="
-        log_msg "Controller should be restarted and running new version"
+    cd /tmp
+    echo "Downloading new script..."
+    if wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
+        echo "Download successful"
+        chmod +x install-controller-proxy.sh
+        echo "Executing new script..."
         
-        # Test if new service is responding
-        sleep 5
-        log_msg "Testing new service..."
-        if curl -s -m 10 "http://localhost:3001/health" >/dev/null 2>&1; then
-            log_msg "✓ New service is responding to health checks"
+        # Create a wrapper script that ignores interruptions
+        cat > /tmp/update-wrapper.sh << '"'"'WRAPPER_EOF'"'"'
+#!/bin/bash
+# Ignore all signals during installation
+trap '"'"''"'"' HUP INT QUIT TERM
+exec ./install-controller-proxy.sh
+WRAPPER_EOF
+        
+        chmod +x /tmp/update-wrapper.sh
+        
+        if /tmp/update-wrapper.sh; then
+            echo "===== Update completed successfully: $(date) ====="
         else
-            log_msg "⚠ New service health check failed, but installation completed"
+            echo "===== Update script failed: $(date) ====="
         fi
         
+        # Clean up wrapper
+        rm -f /tmp/update-wrapper.sh
     else
-        log_msg "===== Update script execution failed: $(date) ====="
-        exit 1
+        echo "===== Download failed: $(date) ====="
     fi
     
-else
-    log_msg "===== Download failed: $(date) ====="
-    log_msg "Wget exit code: $?"
-    log_msg "Network connectivity test:"
-    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-        log_msg "✓ Internet connectivity available"
-    else
-        log_msg "✗ No internet connectivity"
-    fi
+    # Clean up
+    rm -f /tmp/update-controller.sh
+    echo "Cleanup completed"
     
-    if ping -c 1 github.com >/dev/null 2>&1; then
-        log_msg "✓ GitHub is reachable"
-    else
-        log_msg "✗ GitHub is not reachable"
-    fi
-    exit 1
-fi
-
-log_msg "Cleaning up temporary files..."
-rm -f install-controller-proxy.sh
-
-log_msg "===== Update process completed: $(date) ====="
-
 ' >/dev/null 2>&1 &
 
-# Get the background process PID for logging
-bg_pid=$!
-echo "Background update process started with PID: $bg_pid"
-
-# Exit the immediate parent quickly
+# Exit immediately
 exit 0
 '''
             
             # Write the update script
-            script_path = '/tmp/update-controller.sh'
-            with open(script_path, 'w') as f:
+            with open('/tmp/update-controller.sh', 'w') as f:
                 f.write(update_script)
             
             # Make it executable
-            subprocess.run(['chmod', '+x', script_path], timeout=5, check=True)
+            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Clear any existing log file
-            try:
-                if os.path.exists('/tmp/update.log'):
-                    os.remove('/tmp/update.log')
-            except:
-                pass
-            
-            # Start the update process with maximum isolation
-            process = subprocess.Popen(
-                ['/bin/bash', script_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,  # Creates new process group
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None  # Additional isolation
-            )
-            
-            # Wait briefly to capture immediate output/errors
-            try:
-                stdout, stderr = process.communicate(timeout=2)
-                stdout_text = stdout.decode('utf-8') if stdout else ''
-                stderr_text = stderr.decode('utf-8') if stderr else ''
-            except subprocess.TimeoutExpired:
-                # This is expected - process should continue in background
-                stdout_text = 'Process started in background'
-                stderr_text = ''
+            # Start the process
+            subprocess.Popen(['/bin/bash', '/tmp/update-controller.sh'], 
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL,
+                           stdin=subprocess.DEVNULL)
             
             return {
                 'operation': 'controller_update',
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started with enhanced isolation.',
-                'stdout': stdout_text,
-                'stderr': stderr_text,
-                'process_isolation': 'enabled',
-                'background_pid': process.pid if process.poll() is None else 'completed',
+                'output': 'Update process started with interruption protection.',
+                'stdout': 'Update initiated with signal protection',
+                'stderr': '',
                 'timestamp': current_time,
-                'message': 'Controller update initiated with maximum process isolation',
-                'notes': [
-                    'Update is running in isolated process group with setsid',
-                    'Check /tmp/update.log for detailed progress',
-                    'Service will restart automatically when update completes',
-                    'Process started in new session to prevent signal interference',
-                    'Enhanced error logging and connectivity testing enabled'
-                ]
+                'message': 'Controller update initiated successfully',
+                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
+            
         except Exception as e:
             return {
                 'operation': 'controller_update',
@@ -539,7 +440,7 @@ exit 0
                 'stderr': str(e),
                 'timestamp': self._get_current_time(),
                 'message': f'Update initiation failed: {str(e)}',
-                'notes': ['Failed to start the background update process.']
+                'notes': 'Failed to start the background update process.'
             }
     
     def _get_update_log(self):
