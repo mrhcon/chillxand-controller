@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.76"
+CHILLXAND_VERSION="v1.0.77"
 
 set -e  # Exit on any error
 
@@ -472,63 +472,62 @@ echo "Background update process started with PID: $bg_pid"
 # Exit the immediate parent quickly
 exit 0
 '''
-                
-                # Write the update script
-                script_path = '/tmp/update-controller.sh'
-                with open(script_path, 'w') as f:
-                    f.write(update_script)
-                
-                # Make it executable
-                subprocess.run(['chmod', '+x', script_path], timeout=5, check=True)
-                
-                # Clear any existing log file
-                try:
-                    if os.path.exists('/tmp/update.log'):
-                        os.remove('/tmp/update.log')
-                except:
-                    pass
-                
-                # Start the update process with maximum isolation
-                process = subprocess.Popen(
-                    ['/bin/bash', script_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,  # Creates new process group
-                    preexec_fn=os.setsid if hasattr(os, 'setsid') else None  # Additional isolation
-                )
-                
-                # Wait briefly to capture immediate output/errors
-                try:
-                    stdout, stderr = process.communicate(timeout=2)
-                    stdout_text = stdout.decode('utf-8') if stdout else ''
-                    stderr_text = stderr.decode('utf-8') if stderr else ''
-                except subprocess.TimeoutExpired:
-                    # This is expected - process should continue in background
-                    stdout_text = 'Process started in background'
-                    stderr_text = ''
-                
-                return {
-                    'operation': 'controller_update',
-                    'status': 'initiated',
-                    'return_code': 0,
-                    'success': True,
-                    'output': 'Update process started with enhanced isolation.',
-                    'stdout': stdout_text,
-                    'stderr': stderr_text,
-                    'process_isolation': 'enabled',
-                    'background_pid': process.pid if process.poll() is None else 'completed',
-                    'timestamp': current_time,
-                    'message': 'Controller update initiated with maximum process isolation',
-                    'notes': [
-                        'Update is running in isolated process group with setsid',
-                        'Check /tmp/update.log for detailed progress',
-                        'Service will restart automatically when update completes',
-                        'Process started in new session to prevent signal interference',
-                        'Enhanced error logging and connectivity testing enabled'
-                    ]
-                }
-                
+            
+            # Write the update script
+            script_path = '/tmp/update-controller.sh'
+            with open(script_path, 'w') as f:
+                f.write(update_script)
+            
+            # Make it executable
+            subprocess.run(['chmod', '+x', script_path], timeout=5, check=True)
+            
+            # Clear any existing log file
+            try:
+                if os.path.exists('/tmp/update.log'):
+                    os.remove('/tmp/update.log')
+            except:
+                pass
+            
+            # Start the update process with maximum isolation
+            process = subprocess.Popen(
+                ['/bin/bash', script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,  # Creates new process group
+                preexec_fn=os.setsid if hasattr(os, 'setsid') else None  # Additional isolation
+            )
+            
+            # Wait briefly to capture immediate output/errors
+            try:
+                stdout, stderr = process.communicate(timeout=2)
+                stdout_text = stdout.decode('utf-8') if stdout else ''
+                stderr_text = stderr.decode('utf-8') if stderr else ''
+            except subprocess.TimeoutExpired:
+                # This is expected - process should continue in background
+                stdout_text = 'Process started in background'
+                stderr_text = ''
+            
+            return {
+                'operation': 'controller_update',
+                'status': 'initiated',
+                'return_code': 0,
+                'success': True,
+                'output': 'Update process started with enhanced isolation.',
+                'stdout': stdout_text,
+                'stderr': stderr_text,
+                'process_isolation': 'enabled',
+                'background_pid': process.pid if process.poll() is None else 'completed',
+                'timestamp': current_time,
+                'message': 'Controller update initiated with maximum process isolation',
+                'notes': [
+                    'Update is running in isolated process group with setsid',
+                    'Check /tmp/update.log for detailed progress',
+                    'Service will restart automatically when update completes',
+                    'Process started in new session to prevent signal interference',
+                    'Enhanced error logging and connectivity testing enabled'
+                ]
+            }
         except Exception as e:
             return {
                 'operation': 'controller_update',
