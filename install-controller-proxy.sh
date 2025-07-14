@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.81"
+CHILLXAND_VERSION="v1.0.82"
 
 set -e  # Exit on any error
 
@@ -373,28 +373,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         try:
             current_time = self._get_current_time()
             
-            # Create the update script with TOTAL ISOLATION
-            update_script = f'''#!/bin/bash
+            # Create the update script as a separate file to avoid quoting issues
+            update_script_content = '''#!/bin/bash
 # COMPLETELY ISOLATED UPDATE SCRIPT
-# This script runs in complete isolation from the json-proxy service
-
-# Create a new session and process group
 exec setsid bash -c '
-    # Redirect all I/O
     exec 0</dev/null
     exec 1>/tmp/update.log
     exec 2>&1
     
-    # Ignore ALL signals
     trap "" HUP INT QUIT TERM USR1 USR2 PIPE CHLD
     
     echo "===== Controller Update Started: $(date) ====="
     echo "Running in complete isolation from service"
-    echo "Process PID: $$"
-    echo "Session ID: $(ps -o sid= -p $$)"
+    echo "Process PID: $"
+    echo "Session ID: $(ps -o sid= -p $)"
     
-    # Create lock file
-    echo "{{\\"pid\\": $$, \\"status\\": \\"starting\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}} " > /tmp/update.lock
+    echo "{\\"pid\\": $, \\"status\\": \\"starting\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     
     cd /tmp
     echo "Downloading new script..."
@@ -404,75 +398,48 @@ exec setsid bash -c '
         chmod +x install-controller-proxy.sh.new
         mv install-controller-proxy.sh.new install-controller-proxy.sh
         
-        # Update lock status
-        echo "{{\\"pid\\": $$, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}} " > /tmp/update.lock
+        echo "{\\"pid\\": $, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         
-        echo "Executing new script in background daemon mode..."
+        echo "Executing new script..."
         
-        # Run the script as a daemon with complete isolation
-        nohup bash -c '
-            trap "" HUP INT QUIT TERM USR1 USR2 PIPE CHLD
-            exec ./install-controller-proxy.sh >>/tmp/update.log 2>&1
-        ' &
-        
-        INSTALL_PID=$!
-        echo "Installation script started with PID: $INSTALL_PID"
-        
-        # Wait for installation to complete or timeout after 10 minutes
-        timeout_count=0
-        while kill -0 $INSTALL_PID 2>/dev/null && [ $timeout_count -lt 300 ]; do
-            sleep 2
-            timeout_count=$((timeout_count + 1))
-        done
-        
-        if kill -0 $INSTALL_PID 2>/dev/null; then
-            echo "Installation timed out, but process continues in background"
-            echo "{{\\"pid\\": $$, \\"status\\": \\"timeout_but_running\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}} " > /tmp/update.lock
+        if timeout 600 ./install-controller-proxy.sh; then
+            echo "Installation completed successfully"
+            echo "{\\"pid\\": $, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         else
-            echo "Installation completed"
-            echo "{{\\"pid\\": $$, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}} " > /tmp/update.lock
+            echo "Installation failed or timed out"
+            echo "{\\"pid\\": $, \\"status\\": \\"failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         fi
         
     else
         echo "Download failed"
-        echo "{{\\"pid\\": $$, \\"status\\": \\"download_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}} " > /tmp/update.lock
+        echo "{\\"pid\\": $, \\"status\\": \\"download_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     fi
     
     echo "Update process finished at $(date)"
     
-    # Clean up after delay
     sleep 10
     rm -f /tmp/update-controller.sh /tmp/update.lock
     
 ' &
 
-# Exit immediately - the update process is now completely detached
 exit 0
 '''
             
             # Write the update script
             with open('/tmp/update-controller.sh', 'w') as f:
-                f.write(update_script)
+                f.write(update_script_content)
             
             # Make it executable
             os.chmod('/tmp/update-controller.sh', 0o755)
             
-            # Start the completely detached process
-            # Use double-fork technique for complete daemon isolation
-            pid = os.fork()
-            if pid == 0:
-                # First child
-                os.setsid()  # Create new session
-                pid2 = os.fork()
-                if pid2 == 0:
-                    # Second child - this becomes the daemon
-                    os.execv('/bin/bash', ['bash', '/tmp/update-controller.sh'])
-                else:
-                    # First child exits
-                    os._exit(0)
-            else:
-                # Parent process - wait for first child to exit
-                os.waitpid(pid, 0)
+            # Start the completely detached process using simple subprocess
+            process = subprocess.Popen(
+                ['/bin/bash', '/tmp/update-controller.sh'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True
+            )
             
             return {
                 'operation': 'controller_update',
@@ -1313,14 +1280,17 @@ show_completion_info() {
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
     echo
-    info "Major Improvements in v1.0.80:"
-    echo "  - COMPLETE DAEMON ISOLATION for updates (double-fork technique)"
+    info "Major Improvements in v1.0.81:"
+    echo "  - FIXED bash syntax error in update script generation"
+    echo "  - Simplified update script structure (no complex nested quoting)"
+    echo "  - COMPLETE DAEMON ISOLATION for updates (using subprocess.Popen)"
     echo "  - Fixed datetime deprecation warnings (now uses timezone-aware datetime)"
     echo "  - Graceful shutdown handling with proper signal management"
     echo "  - Enhanced systemd service configuration with proper timeouts"
     echo "  - Update process now runs as true daemon, completely separate from service"
     echo "  - Lock file system prevents concurrent updates"
     echo "  - Improved error handling and process verification"
+    echo "  - Added timeout to update process (10 minutes max)"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
