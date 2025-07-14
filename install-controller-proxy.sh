@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.86"
+CHILLXAND_VERSION="v1.0.87"
 
 set -e  # Exit on any error
 
@@ -1280,17 +1280,13 @@ show_completion_info() {
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
     echo
-    info "Major Improvements in v1.0.82:"
-    echo "  - USES SYSTEMD-RUN for true process isolation (no parent-child relationship)"
-    echo "  - Update process runs as independent systemd scope"
-    echo "  - Fallback to 'at' scheduler if systemd-run unavailable"
-    echo "  - Final fallback creates script for manual execution"
-    echo "  - Completely eliminates child process issues with systemd"
-    echo "  - Simplified update script (no complex session management needed)"
-    echo "  - Fixed datetime deprecation warnings"
-    echo "  - Graceful shutdown handling with proper signal management"
-    echo "  - Enhanced systemd service configuration with proper timeouts"
-    echo "  - Lock file system prevents concurrent updates"
+    info "v1.0.85 - Executes the Exact GitHub Command:"
+    echo "  - /update/controller now runs: wget -O - https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh | bash"
+    echo "  - Simple wrapper script executes the exact command that works manually"
+    echo "  - No complex download/save/execute - direct pipe execution"
+    echo "  - Maintains lock file system to prevent concurrent updates"
+    echo "  - Logs output to /tmp/update.log for monitoring"
+    echo "  - Uses nohup + start_new_session for background execution"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
