@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.78"
+CHILLXAND_VERSION="v1.0.79"
 
 set -e  # Exit on any error
 
@@ -344,58 +344,88 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script from GitHub - No interruption version"""
+        """Update the controller script from GitHub - Improved version with proper isolation"""
+        lock_file = '/tmp/update.lock'
+        
+        # Check if update is already running
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as f:
+                    lock_data = json.load(f)
+                existing_pid = lock_data.get('pid')
+                if existing_pid and os.path.exists(f'/proc/{existing_pid}'):
+                    return {
+                        'operation': 'controller_update',
+                        'status': 'already_running',
+                        'success': False,
+                        'message': f'Update already in progress (PID: {existing_pid})',
+                        'timestamp': self._get_current_time(),
+                        'notes': 'Another update process is currently running. Please wait for it to complete.'
+                    }
+            except:
+                pass
+        
         try:
             current_time = self._get_current_time()
             
-            # Create an update script that completes regardless of interruptions
+            # Create lock file with process info
+            with open(lock_file, 'w') as f:
+                json.dump({
+                    'pid': os.getpid(),
+                    'started': current_time,
+                    'status': 'starting'
+                }, f)
+            
+            # Create an update script with complete isolation and proper service handling
             update_script = '''#!/bin/bash
-# Detach completely and ignore all signals during update
-trap '' HUP INT QUIT TERM
+# Complete isolation from parent process
+exec 0</dev/null
+exec 1>/tmp/update.log
+exec 2>&1
 
-# Run in background with nohup for extra protection
-nohup bash -c '
-    # Sleep to allow HTTP response to be sent
-    sleep 5
+# Ignore ALL signals during update
+trap '' HUP INT QUIT TERM USR1 USR2 PIPE
+
+# Start in background with complete detachment
+nohup setsid bash -c '
+    # Additional signal protection
+    trap "" HUP INT QUIT TERM USR1 USR2 PIPE
     
-    # Log everything to update.log
-    exec >> /tmp/update.log 2>&1
+    # Update lock file status
+    echo "{\\"pid\\": $$, \\"status\\": \\"downloading\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     
     echo "===== Controller Update Started: $(date) ====="
-    echo "Starting controller update..."
+    echo "Process PID: $$"
+    echo "Starting controller update with complete isolation..."
     
     cd /tmp
     echo "Downloading new script..."
     if wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
         echo "Download successful"
         chmod +x install-controller-proxy.sh
-        echo "Executing new script..."
         
-        # Create a wrapper script that ignores interruptions
-        cat > /tmp/update-wrapper.sh << '"'"'WRAPPER_EOF'"'"'
-#!/bin/bash
-# Ignore all signals during installation
-trap '"'"''"'"' HUP INT QUIT TERM
-exec ./install-controller-proxy.sh
-WRAPPER_EOF
+        # Update lock file status
+        echo "{\\"pid\\": $$, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         
-        chmod +x /tmp/update-wrapper.sh
+        echo "Executing new script with proper service isolation..."
         
-        if /tmp/update-wrapper.sh; then
+        # Execute the script with complete detachment
+        if ./install-controller-proxy.sh; then
             echo "===== Update completed successfully: $(date) ====="
+            echo "{\\"pid\\": $$, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         else
             echo "===== Update script failed: $(date) ====="
+            echo "{\\"pid\\": $$, \\"status\\": \\"failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         fi
-        
-        # Clean up wrapper
-        rm -f /tmp/update-wrapper.sh
     else
         echo "===== Download failed: $(date) ====="
+        echo "{\\"pid\\": $$, \\"status\\": \\"download_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     fi
     
     # Clean up
-    rm -f /tmp/update-controller.sh
-    echo "Cleanup completed"
+    sleep 5
+    rm -f /tmp/update-controller.sh /tmp/update.lock
+    echo "Update process cleanup completed"
     
 ' >/dev/null 2>&1 &
 
@@ -410,26 +440,33 @@ exit 0
             # Make it executable
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Start the process
+            # Start the completely isolated process
             subprocess.Popen(['/bin/bash', '/tmp/update-controller.sh'], 
                            stdout=subprocess.DEVNULL, 
                            stderr=subprocess.DEVNULL,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL,
+                           preexec_fn=os.setsid)
             
             return {
                 'operation': 'controller_update',
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started with interruption protection.',
-                'stdout': 'Update initiated with signal protection',
+                'output': 'Update process started with complete isolation and signal protection.',
+                'stdout': 'Update initiated successfully',
                 'stderr': '',
                 'timestamp': current_time,
-                'message': 'Controller update initiated successfully',
-                'notes': 'Update is running with full signal protection. Check /tmp/update.log for progress. Service will restart automatically when complete.'
+                'message': 'Controller update initiated successfully with improved isolation',
+                'notes': 'Update is running with complete signal protection and service isolation. Check /tmp/update.log for progress. Service will be properly restarted when complete.'
             }
             
         except Exception as e:
+            # Clean up lock file on error
+            try:
+                os.remove(lock_file)
+            except:
+                pass
+                
             return {
                 'operation': 'controller_update',
                 'status': 'error',
@@ -444,10 +481,20 @@ exit 0
             }
     
     def _get_update_log(self):
-        """Get the contents of the update log file"""
+        """Get the contents of the update log file and lock status"""
         try:
             current_time = self._get_current_time()
             log_file = '/tmp/update.log'
+            lock_file = '/tmp/update.lock'
+            
+            # Check lock file for status
+            lock_status = None
+            if os.path.exists(lock_file):
+                try:
+                    with open(lock_file, 'r') as f:
+                        lock_status = json.load(f)
+                except:
+                    pass
             
             if not os.path.exists(log_file):
                 return {
@@ -459,6 +506,7 @@ exit 0
                     'log_lines': [],
                     'file_size': 0,
                     'last_modified': None,
+                    'lock_status': lock_status,
                     'timestamp': current_time,
                     'message': 'No update log file found',
                     'notes': 'Update log will be created when an update is initiated.'
@@ -474,7 +522,10 @@ exit 0
                 
                 log_lines = log_content.strip().split('\n') if log_content.strip() else []
                 
-                if 'Update completed successfully' in log_content:
+                # Determine status from log content and lock file
+                if lock_status:
+                    status = lock_status.get('status', 'unknown')
+                elif 'Update completed successfully' in log_content:
                     status = 'completed_success'
                 elif 'error' in log_content.lower() or 'failed' in log_content.lower():
                     status = 'completed_error'
@@ -493,6 +544,7 @@ exit 0
                     'line_count': len(log_lines),
                     'file_size': file_size,
                     'last_modified': last_modified,
+                    'lock_status': lock_status,
                     'timestamp': current_time,
                     'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
                     'notes': f'Log file last modified: {last_modified}'
@@ -508,6 +560,7 @@ exit 0
                     'log_lines': [],
                     'file_size': file_size,
                     'last_modified': last_modified,
+                    'lock_status': lock_status,
                     'error': str(read_error),
                     'timestamp': current_time,
                     'message': f'Failed to read update log: {str(read_error)}',
@@ -916,25 +969,59 @@ EOF
     log "Systemd service file created"
 }
 
-# Enable and start the service
+# Enable and start the service - IMPROVED VERSION with signal protection
 setup_service() {
+    # Protect this critical section from signals that could interrupt the installation
+    trap '' HUP INT QUIT TERM USR1 USR2
+    
     log "Reloading systemd daemon..."
     systemctl daemon-reload
     
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    # Check if service is already running and restart if so, otherwise start fresh
+    # Check if service is already running and handle properly
     if systemctl is-active --quiet json-proxy.service; then
-        log "Service is already running, restarting to pick up new script..."
-        systemctl restart json-proxy.service
+        log "Stopping existing json-proxy service to avoid conflicts..."
+        systemctl stop json-proxy.service
+        
+        # Wait for service to fully stop
+        sleep 5
+        
+        # Verify it's stopped
+        local stop_attempts=0
+        while systemctl is-active --quiet json-proxy.service && [ $stop_attempts -lt 10 ]; do
+            log "Waiting for service to stop... (attempt $((stop_attempts + 1)))"
+            sleep 2
+            stop_attempts=$((stop_attempts + 1))
+        done
+        
+        if systemctl is-active --quiet json-proxy.service; then
+            warn "Service did not stop gracefully, forcing stop..."
+            systemctl kill json-proxy.service
+            sleep 3
+        fi
+        
+        log "Starting json-proxy service with new script..."
+        systemctl start json-proxy.service
     else
         log "Starting json-proxy service..."
         systemctl start json-proxy.service
     fi
     
-    # Wait a moment for service to start
-    sleep 3
+    # Wait for service to start
+    sleep 5
+    
+    # Verify service started successfully
+    local start_attempts=0
+    while ! systemctl is-active --quiet json-proxy.service && [ $start_attempts -lt 10 ]; do
+        log "Waiting for service to start... (attempt $((start_attempts + 1)))"
+        sleep 2
+        start_attempts=$((start_attempts + 1))
+    done
+    
+    # Restore normal signal handling
+    trap cleanup INT TERM
     
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
@@ -1156,6 +1243,13 @@ show_completion_info() {
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
     echo
+    info "Update System Improvements (v1.0.79):"
+    echo "  - Complete signal isolation during updates"
+    echo "  - Proper service stop/start sequence (no more interruptions)"
+    echo "  - Update lock file prevents multiple simultaneous updates"
+    echo "  - Enhanced error handling and status tracking"
+    echo "  - Improved process isolation with setsid and nohup"
+    echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
     echo "  - Enhanced memory monitoring (RAM + swap details)"
@@ -1181,7 +1275,7 @@ show_completion_info() {
     echo "  curl -s http://localhost:3001/health | jq '.chillxand_controller_version'"
     echo "  curl -s http://localhost:3001/versions | jq '.data.chillxand_controller'"
     echo
-    log "Installation completed successfully!"
+    log "Installation completed successfully with improved update reliability!"
 }
 
 # Cleanup function for script interruption
@@ -1194,7 +1288,7 @@ cleanup() {
 main() {
     trap cleanup INT TERM
     
-    log "Starting JSON Proxy Service Installation..."
+    log "Starting JSON Proxy Service Installation (v${CHILLXAND_VERSION})..."
     
     check_root
     install_dependencies
