@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.83"
+CHILLXAND_VERSION="v1.0.85"
 
 set -e  # Exit on any error
 
@@ -1280,17 +1280,17 @@ show_completion_info() {
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
     echo
-    info "Major Improvements in v1.0.81:"
-    echo "  - FIXED bash syntax error in update script generation"
-    echo "  - Simplified update script structure (no complex nested quoting)"
-    echo "  - COMPLETE DAEMON ISOLATION for updates (using subprocess.Popen)"
-    echo "  - Fixed datetime deprecation warnings (now uses timezone-aware datetime)"
+    info "Major Improvements in v1.0.82:"
+    echo "  - USES SYSTEMD-RUN for true process isolation (no parent-child relationship)"
+    echo "  - Update process runs as independent systemd scope"
+    echo "  - Fallback to 'at' scheduler if systemd-run unavailable"
+    echo "  - Final fallback creates script for manual execution"
+    echo "  - Completely eliminates child process issues with systemd"
+    echo "  - Simplified update script (no complex session management needed)"
+    echo "  - Fixed datetime deprecation warnings"
     echo "  - Graceful shutdown handling with proper signal management"
     echo "  - Enhanced systemd service configuration with proper timeouts"
-    echo "  - Update process now runs as true daemon, completely separate from service"
     echo "  - Lock file system prevents concurrent updates"
-    echo "  - Improved error handling and process verification"
-    echo "  - Added timeout to update process (10 minutes max)"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
