@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.115"
+CHILLXAND_VERSION="v1.0.116"
 
 set -e  # Exit on any error
 
@@ -553,6 +553,7 @@ rm -f /tmp/update-controller.sh
                 subprocess.run([
                     'systemd-run', 
                     '--scope', 
+                    '--no-block',  # Don't wait for scope to finish
                     '/tmp/update-controller.sh'
                 ], timeout=5)
             
