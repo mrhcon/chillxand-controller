@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.134"
+CHILLXAND_VERSION="v1.0.135"
 
 set -e  # Exit on any error
 
@@ -522,7 +522,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Only create and run script if update is needed
             if initiate_update:        
                 # Create a temporary script to handle the update
-                update_script = '''#!/bin/bash
+                update_script = f'''#!/bin/bash
 set -e
 # Sleep to allow HTTP response to be sent first
 sleep 2
