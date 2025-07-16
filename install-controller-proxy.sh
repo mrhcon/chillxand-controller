@@ -108,7 +108,6 @@ create_python_script() {
     
     cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
-#!/usr/bin/env python3
 import http.server
 import socketserver
 import requests
@@ -194,6 +193,17 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': status_messages,
                 'return_code': result.returncode,
                 'timestamp': self._get_current_time()
+            }
+        except Exception as e:
+            return {
+                'service': service_name,
+                'error': str(e),
+                'active': 'unknown',
+                'enabled': 'unknown',
+                'status_messages': [],
+                'timestamp': self._get_current_time()
+            }
+
     def _get_update_log(self):
         """Get the contents of the update log file"""
         try:
@@ -279,15 +289,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'timestamp': self._get_current_time(),
                 'message': f'Failed to access update log: {str(e)}',
                 'notes': 'An error occurred while trying to access the log file.'
-            }
-        except Exception as e:
-            return {
-                'service': service_name,
-                'error': str(e),
-                'active': 'unknown',
-                'enabled': 'unknown',
-                'status_messages': [],
-                'timestamp': self._get_current_time()
             }
     
     def _get_network_stats(self):
