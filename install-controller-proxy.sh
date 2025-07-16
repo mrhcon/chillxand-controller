@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.140"
+CHILLXAND_VERSION="v1.0.141"
 
 set -e  # Exit on any error
 
@@ -208,6 +208,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _get_update_log(self):
         """Get the contents of the update log file"""
         try:
+            import os
+        
             current_time = self._get_current_time()
             
             # Check if log file exists
@@ -227,7 +229,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 }
             
             # Get file stats
-            import os
             stat = os.stat(log_file)
             file_size = stat.st_size
             last_modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%dT%H:%M:%SZ')
