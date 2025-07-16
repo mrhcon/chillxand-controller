@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.138"
+CHILLXAND_VERSION="v1.0.139"
 
 set -e  # Exit on any error
 
@@ -541,14 +541,14 @@ sleep 2
 echo "Starting controller update..." > /tmp/update.log 2>&1
 cd /tmp
 
-echo "3Current version: {current_version}" >> /tmp/update.log 2>&1
+echo "Current version: {current_version}" >> /tmp/update.log 2>&1
 echo "Target version: {github_version}" >> /tmp/update.log 2>&1
 echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
 
 wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
 
 # Verify downloaded version
-DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION="' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
 echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
 
 chmod +x install-controller-proxy.sh
@@ -571,13 +571,17 @@ rm -f /tmp/update-controller.sh
                 #                stdout=subprocess.DEVNULL, 
                 #                stderr=subprocess.DEVNULL,
                 #                start_new_session=True)
-                # Instead of subprocess.Popen, use systemd-run
-                subprocess.run([
-                    'systemd-run', 
-                    '--scope', 
-                    '--no-block',  # Don't wait for scope to finish
-                    '/tmp/update-controller.sh'
-                ])
+                # # Instead of subprocess.Popen, use systemd-run
+                # subprocess.run([
+                #     'systemd-run', 
+                #     '--scope', 
+                #     '--no-block',  # Don't wait for scope to finish
+                #     '/tmp/update-controller.sh'
+                # ])
+                # Replace systemd-run with simple nohup
+                subprocess.Popen([
+                    'nohup', '/tmp/update-controller.sh'
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             
             # Return comprehensive response
             return {
