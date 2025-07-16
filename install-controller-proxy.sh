@@ -115,7 +115,7 @@ import sys
 import subprocess
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ChillXand Controller Version
 CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
@@ -173,7 +173,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return "localhost"
     
     def _get_current_time(self):
-        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        return datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -967,7 +967,7 @@ rm -f /tmp/update-controller.sh
         # Log requests with IP addresses for security monitoring
         client_ip = self.client_address[0]
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
-        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
+        print(f"[{datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
 PORT = 3001
 if __name__ == "__main__":
