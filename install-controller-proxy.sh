@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.130"
+CHILLXAND_VERSION="v1.0.132"
 
 set -e  # Exit on any error
 
@@ -481,18 +481,23 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             try:
                 import subprocess
                 import time
-                
-                timestamp = str(int(time.time()))
-                
-                result = subprocess.run([
-                    'bash', '-c',
-                    f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={timestamp}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
-                ], capture_output=True, text=True, timeout=30)
-                
-                github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
-                
-            except Exception as e:
-                github_version = f"error: {str(e)}"
+                import random
+
+                # Generate cache-busting values in Python      
+                timestamp = str(int(time.time()))          
+                random_num = str(random.randint(1, 10000))
+                cache_bust = f"{timestamp}_{random_num}"
+
+                # Get latest version from GitHub using the same cache-busting
+                try:                
+                    result = subprocess.run([
+                        'bash', '-c',
+                        f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={cache_bust}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+                except Exception as e:
+                github_version = f"error: {str(e)}"                
             
             # Determine if update is needed
             update_needed = github_version != current_version and not github_version.startswith("error:")
@@ -524,19 +529,16 @@ sleep 2
 echo "Starting controller update..." > /tmp/update.log 2>&1
 cd /tmp
 
-# Use more robust cache-busting techniques
-TIMESTAMP=$(date +%s)
-RANDOM_NUM=$(shuf -i 1-10000 -n 1 2>/dev/null || echo $(($(date +%N) % 10000)))
-echo "2Cache-busting: timestamp=${TIMESTAMP}, random=${RANDOM_NUM}" >> /tmp/update.log 2>&1
+echo "3Current version: {current_version}" >> /tmp/update.log 2>&1
+echo "Target version: {github_version}" >> /tmp/update.log 2>&1
+echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
 
-# Verify variables are set
-if [ -z "$TIMESTAMP" ] || [ -z "$RANDOM_NUM" ]; then
-    echo "ERROR: Cache-busting variables not set properly" >> /tmp/update.log 2>&1
-    echo "TIMESTAMP='${TIMESTAMP}', RANDOM_NUM='${RANDOM_NUM}'" >> /tmp/update.log 2>&1
-    exit 1
-fi
+wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
 
-wget --no-cache --no-cookies --user-agent="ChillXandController/${TIMESTAMP}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?v=${TIMESTAMP}&r=${RANDOM_NUM}" >> /tmp/update.log 2>&1
+# Verify downloaded version
+DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION="' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+
 chmod +x install-controller-proxy.sh
 echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
 ./install-controller-proxy.sh >> /tmp/update.log 2>&1
