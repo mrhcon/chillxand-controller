@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.110"
+CHILLXAND_VERSION="v1.0.112"
 
 set -e  # Exit on any error
 
@@ -473,9 +473,53 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Update the controller script from GitHub - Fire and forget method"""
         try:
             current_time = self._get_current_time()
+
+            # Get current installed version
+            current_version = CHILLXAND_CONTROLLER_VERSION
+
+            # Get latest version from GitHub
+            try:
+                import urllib.request
+                import re
+                
+                # Download GitHub script with cache-busting
+                timestamp = str(int(time.time())) if 'time' in dir() else '1'
+                github_url = f"https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={timestamp}"
+                
+                with urllib.request.urlopen(github_url) as response:
+                    github_script = response.read().decode('utf-8')
+                
+                # Extract version from GitHub script
+                version_match = re.search(r'CHILLXAND_VERSION="([^"]+)"', github_script)
+                github_version = version_match.group(1) if version_match else "unknown"
+                
+            except Exception as e:
+                github_version = f"error: {str(e)}"
             
-            # Create a temporary script to handle the update
-            update_script = '''#!/bin/bash
+            # Determine if update is needed
+            update_needed = github_version != current_version and not github_version.startswith("error:")
+            
+            # Determine status and message based on versions
+            if github_version.startswith("error:"):
+                status = "error_github_check"
+                message = f"Could not check GitHub version: {github_version}"
+                initiate_update = False
+                script_created = False
+            elif not update_needed:
+                status = "no_update_needed" 
+                message = f"Already running latest version ({current_version})"
+                initiate_update = False
+                script_created = False
+            else:
+                status = "update_initiated"
+                message = f"Update initiated from {current_version} to {github_version}"
+                initiate_update = True
+                script_created = True
+
+            # Only create and run script if update is needed
+            if initiate_update:        
+                # Create a temporary script to handle the update
+                update_script = '''#!/bin/bash
 set -e
 # Sleep to allow HTTP response to be sent first
 sleep 2
@@ -493,52 +537,64 @@ echo "Update completed successfully" >> /tmp/update.log 2>&1
 rm -f /tmp/update-controller.sh
 '''
             
-            # Write the update script
-            with open('/tmp/update-controller.sh', 'w') as f:
-                f.write(update_script)
+                # Write the update script
+                with open('/tmp/update-controller.sh', 'w') as f:
+                    f.write(update_script)
+                
+                # Make it executable
+                subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+                
+                # Start the update process in the background (fire and forget)
+                # subprocess.Popen(['/tmp/update-controller.sh'], 
+                #                stdout=subprocess.DEVNULL, 
+                #                stderr=subprocess.DEVNULL,
+                #                start_new_session=True)
+                # Instead of subprocess.Popen, use systemd-run
+                subprocess.run([
+                    'systemd-run', 
+                    '--scope', 
+                    '--user=root',
+                    '/tmp/update-controller.sh'
+                ], timeout=5)
             
-            # Make it executable
-            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
-            
-            # Start the update process in the background (fire and forget)
-            # subprocess.Popen(['/tmp/update-controller.sh'], 
-            #                stdout=subprocess.DEVNULL, 
-            #                stderr=subprocess.DEVNULL,
-            #                start_new_session=True)
-            # Instead of subprocess.Popen, use systemd-run
-            subprocess.run([
-                'systemd-run', 
-                '--scope', 
-                '--user=root',
-                '/tmp/update-controller.sh'
-            ], timeout=5)
-            
-            # Return immediately while update runs in background
+            # Return comprehensive response
             return {
                 'operation': 'controller_update',
-                'status': 'initiated',
-                'return_code': 0,
+                'status': status,
                 'success': True,
-                'output': 'Update process started in background. Service will restart automatically.',
-                'stdout': 'Update initiated successfully',
-                'stderr': '',
+                'versions': {
+                    'current_installed': current_version,
+                    'github_latest': github_version,
+                    'update_needed': update_needed
+                },
+                'update_process': {
+                    'initiated': initiate_update,
+                    'background_script_created': script_created,
+                    'script_path': '/tmp/update-controller.sh' if script_created else None
+                },
                 'timestamp': current_time,
-                'message': 'Controller update initiated successfully',
-                'notes': 'Update is running in background. Check /tmp/update.log for progress. Service will restart automatically when complete.'
-            }
-            
+                'message': message,
+                'notes': 'Update runs in background. Check /tmp/update.log for progress.' if initiate_update else 'No update process started.'
+            }                
         except Exception as e:
             return {
                 'operation': 'controller_update',
-                'status': 'error',
-                'return_code': -1,
+                'status': 'exception',
                 'success': False,
-                'output': f'Failed to initiate update: {str(e)}',
-                'stdout': '',
-                'stderr': str(e),
+                'versions': {
+                    'current_installed': CHILLXAND_CONTROLLER_VERSION,
+                    'github_latest': 'unknown',
+                    'update_needed': 'unknown'
+                },
+                'update_process': {
+                    'initiated': False,
+                    'background_script_created': False,
+                    'script_path': None
+                },
+                'error': str(e),
                 'timestamp': self._get_current_time(),
-                'message': f'Update initiation failed: {str(e)}',
-                'notes': 'Failed to start the background update process.'
+                'message': f'Update endpoint failed: {str(e)}',
+                'notes': 'An exception occurred in the update endpoint.'
             }
         
     def _get_health_data(self):
