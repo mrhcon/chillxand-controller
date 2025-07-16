@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.121"
+CHILLXAND_VERSION="v1.0.122"
 
 set -e  # Exit on any error
 
@@ -479,19 +479,17 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 
             # Get latest version from GitHub
             try:
-                import urllib.request
-                import re
+                import subprocess
+                import time
                 
-                # Download GitHub script with cache-busting
-                timestamp = str(int(time.time())) if 'time' in dir() else '1'
-                github_url = f"https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={timestamp}"
+                timestamp = str(int(time.time()))
                 
-                with urllib.request.urlopen(github_url) as response:
-                    github_script = response.read().decode('utf-8')
+                result = subprocess.run([
+                    'bash', '-c',
+                    f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={timestamp}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
+                ], capture_output=True, text=True, timeout=30)
                 
-                # Extract version from GitHub script
-                version_match = re.search(r'CHILLXAND_VERSION="([^"]+)"', github_script)
-                github_version = version_match.group(1) if version_match else "unknown"
+                github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
                 
             except Exception as e:
                 github_version = f"error: {str(e)}"
