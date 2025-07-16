@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.122"
+CHILLXAND_VERSION="v1.0.124"
 
 set -e  # Exit on any error
 
@@ -526,6 +526,7 @@ cd /tmp
 # Use multiple cache-busting techniques
 TIMESTAMP=$(date +%s)
 RANDOM_NUM=$((RANDOM % 10000))
+echo "Cache-busting: timestamp=${TIMESTAMP}, random=${RANDOM_NUM}" >> /tmp/update.log 2>&1
 wget --no-cache --no-cookies --user-agent="ChillXandController/${TIMESTAMP}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?v=${TIMESTAMP}&r=${RANDOM_NUM}" >> /tmp/update.log 2>&1
 chmod +x install-controller-proxy.sh
 echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
