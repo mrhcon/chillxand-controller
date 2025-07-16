@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.90"
+CHILLXAND_VERSION="v1.0.100"
 
 set -e  # Exit on any error
 
@@ -43,24 +43,24 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages..."
-    # Try multiple approaches for apt-get update (suppress warnings)
-    if ! apt-get update 2>/dev/null; then
-        warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
-        if ! apt-get update --allow-unauthenticated 2>/dev/null; then
-            warn "Apt-get update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
-            if ! apt-get update --allow-releaseinfo-change 2>/dev/null; then
-                warn "All apt-get update attempts failed, continuing anyway..."
+    # Try multiple approaches for apt update
+    if ! apt update; then
+        warn "Standard apt update failed, trying with --allow-unauthenticated..."
+        if ! apt update --allow-unauthenticated; then
+            warn "Apt update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
+            if ! apt update --allow-releaseinfo-change; then
+                warn "All apt update attempts failed, continuing anyway..."
                 warn "Some packages may not be available or up to date"
             fi
         fi
     fi
 
     log "Installing required packages..."
-    # Install packages one by one with fallbacks using apt-get (suppress warnings)
+    # Install packages one by one with fallbacks
     for package in ufw python3 python3-pip net-tools curl; do
-        if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y "$package" 2>/dev/null; then
-            warn "Failed to install $package via apt-get, trying with --allow-unauthenticated..."
-            if ! DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated "$package" 2>/dev/null; then
+        if ! apt install -y "$package"; then
+            warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
+            if ! apt install -y --allow-unauthenticated "$package"; then
                 if [[ "$package" == "net-tools" ]]; then
                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
                 elif [[ "$package" == "ufw" ]]; then
@@ -78,25 +78,25 @@ install_dependencies() {
     done
 
     log "Installing Python requests module..."
-    # Try to install python3-requests via apt-get first (suppress warnings)
-    if DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-requests 2>/dev/null; then
-        log "Successfully installed python3-requests via apt-get"
-    elif DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --allow-unauthenticated python3-requests 2>/dev/null; then
-        log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
+    # Try to install python3-requests via apt first (preferred method)
+    if apt install -y python3-requests; then
+        log "Successfully installed python3-requests via apt"
+    elif apt install -y --allow-unauthenticated python3-requests; then
+        log "Successfully installed python3-requests via apt (with --allow-unauthenticated)"
     else
-        warn "Failed to install python3-requests via apt-get, trying pip..."
+        warn "Failed to install python3-requests via apt, trying pip..."
         # Try different pip installation methods
-        if pip3 install requests >/dev/null 2>&1; then
+        if pip3 install requests; then
             log "Successfully installed requests via pip3"
-        elif pip3 install --break-system-packages requests >/dev/null 2>&1; then
+        elif pip3 install --break-system-packages requests; then
             log "Successfully installed requests via pip3 (with --break-system-packages)"
-        elif python3 -m pip install requests >/dev/null 2>&1; then
+        elif python3 -m pip install requests; then
             log "Successfully installed requests via python3 -m pip"
-        elif python3 -m pip install --break-system-packages requests >/dev/null 2>&1; then
+        elif python3 -m pip install --break-system-packages requests; then
             log "Successfully installed requests via python3 -m pip (with --break-system-packages)"
         else
             error "Failed to install requests module through all methods"
-            error "Please install python3-requests manually: apt-get install python3-requests"
+            error "Please install python3-requests manually: apt install python3-requests"
             exit 1
         fi
     fi
@@ -108,6 +108,7 @@ create_python_script() {
     
     cat > /opt/json-proxy.py << EOF
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 import http.server
 import socketserver
 import requests
@@ -115,20 +116,19 @@ import sys
 import subprocess
 import json
 import os
-import signal
-from datetime import datetime, timezone
+from datetime import datetime
 
 # ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "${CHILLXAND_VERSION}"
+CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
 
 # Allowed IP addresses - WHITELIST ONLY
 ALLOWED_IPS = {
     '74.208.234.116',   # Master (USA)
     '85.215.145.173',   # Control2 (Germany)
     '194.164.163.124',  # Control3 (Spain)
-    '174.114.192.84',   # Home (add your actual IP here)
-    '67.70.165.78',     # Home (secondary IP)
-    '127.0.0.1'         # Localhost
+    '174.114.192.84',   # Home
+    '127.0.0.1',        # Localhost
+    '::1'               # IPv6 localhost
 }
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
@@ -146,6 +146,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         return True
     
     def _set_cors_headers(self):
+        # Only set CORS headers for allowed IPs
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
@@ -163,14 +164,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Get the server's IP address"""
         try:
             import socket
+            # Get the IP address by connecting to a remote address
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 return s.getsockname()[0]
         except Exception:
+            # Fallback to localhost if we can't determine IP
             return "localhost"
     
     def _get_current_time(self):
-        return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     
     def _get_service_status(self, service_name):
         try:
@@ -191,6 +194,91 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': status_messages,
                 'return_code': result.returncode,
                 'timestamp': self._get_current_time()
+    def _get_update_log(self):
+        """Get the contents of the update log file"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Check if log file exists
+            log_file = '/tmp/update.log'
+            if not os.path.exists(log_file):
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'no_log',
+                    'success': True,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': 0,
+                    'last_modified': None,
+                    'timestamp': current_time,
+                    'message': 'No update log file found',
+                    'notes': 'Update log will be created when an update is initiated.'
+                }
+            
+            # Get file stats
+            import os
+            stat = os.stat(log_file)
+            file_size = stat.st_size
+            last_modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            # Read the log file
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+                
+                # Split into lines for easier parsing
+                log_lines = log_content.strip().split('\n') if log_content.strip() else []
+                
+                # Determine status based on log content
+                if 'Update completed successfully' in log_content:
+                    status = 'completed_success'
+                elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    status = 'completed_error'
+                elif log_content.strip():
+                    status = 'in_progress'
+                else:
+                    status = 'empty'
+                
+                return {
+                    'operation': 'get_update_log',
+                    'status': status,
+                    'success': True,
+                    'log_content': log_content,
+                    'log_lines': log_lines,
+                    'line_count': len(log_lines),
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'timestamp': current_time,
+                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
+                    'notes': f'Log file last modified: {last_modified}'
+                }
+                
+            except Exception as read_error:
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'read_error',
+                    'success': False,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'error': str(read_error),
+                    'timestamp': current_time,
+                    'message': f'Failed to read update log: {str(read_error)}',
+                    'notes': 'Log file exists but could not be read.'
+                }
+                
+        except Exception as e:
+            return {
+                'operation': 'get_update_log',
+                'status': 'error',
+                'success': False,
+                'log_content': '',
+                'log_lines': [],
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Failed to access update log: {str(e)}',
+                'notes': 'An error occurred while trying to access the log file.'
             }
         except Exception as e:
             return {
@@ -235,11 +323,21 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             return {'error': str(e)}
     
+    def _get_cpu_usage(self):
+        try:
+            # Simplified CPU usage - just return load average for now
+            with open('/proc/loadavg', 'r') as f:
+                load_avg = f.read().strip().split()
+                load_1min = float(load_avg[0])
+            return load_1min
+        except Exception as e:
+            return None
+    
     def _get_stats_data(self):
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
-                return response.json()
+                return response.json()              
             else:
                 return {'error': f'HTTP {response.status_code}'}
         except Exception as e:
@@ -253,11 +351,14 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 # Add our proxy version to the versions response
                 if isinstance(upstream_versions, dict):
+                    # If there's a nested data structure, add to it
                     if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
                         upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                     else:
+                        # Add directly to the main object
                         upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
                 else:
+                    # If upstream returned something unexpected, create our own structure
                     upstream_versions = {
                         'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                         'upstream_data': upstream_versions
@@ -293,15 +394,29 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
         }
         return summary
-    
+        
     def _restart_pod_service(self):
         try:
-            symlink_result = subprocess.run(['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'], 
-                                          capture_output=True, text=True, timeout=10)
-            restart_result = subprocess.run(['systemctl', 'restart', 'pod.service'], 
-                                          capture_output=True, text=True, timeout=30)
+            # Create symlink
+            symlink_result = subprocess.run(
+                ['ln', '-sf', '/xandeum-pages', '/run/xandeum-pod'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
             
+            # Restart service
+            restart_result = subprocess.run(
+                ['systemctl', 'restart', 'pod.service'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            # Get status
             status_data = self._get_service_status('pod.service')
+            
+            # Add restart operation info
             status_data['restart_operation'] = {
                 'symlink_created': symlink_result.returncode == 0,
                 'restart_success': restart_result.returncode == 0,
@@ -323,10 +438,18 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     def _restart_service(self, service_name):
         try:
-            restart_result = subprocess.run(['systemctl', 'restart', service_name], 
-                                          capture_output=True, text=True, timeout=30)
+            # Restart service
+            restart_result = subprocess.run(
+                ['systemctl', 'restart', service_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
             
+            # Get status
             status_data = self._get_service_status(service_name)
+            
+            # Add restart operation info
             status_data['restart_operation'] = {
                 'restart_success': restart_result.returncode == 0,
                 'restart_error': restart_result.stderr if restart_result.stderr else None,
@@ -345,122 +468,54 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
     
     def _update_controller(self):
-        """Update the controller script - COMPLETELY ISOLATED from service"""
-        lock_file = '/tmp/update.lock'
-        
-        # Check if update is already running
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    lock_data = json.load(f)
-                existing_pid = lock_data.get('pid')
-                if existing_pid and os.path.exists(f'/proc/{existing_pid}'):
-                    return {
-                        'operation': 'controller_update',
-                        'status': 'already_running',
-                        'success': False,
-                        'message': f'Update already in progress (PID: {existing_pid})',
-                        'timestamp': self._get_current_time(),
-                        'notes': 'Another update process is currently running. Please wait for it to complete.'
-                    }
-            except:
-                # Clean up stale lock file
-                try:
-                    os.remove(lock_file)
-                except:
-                    pass
-        
+        """Update the controller script from GitHub - Fire and forget method"""
         try:
             current_time = self._get_current_time()
             
-            # Create the update script as a separate file to avoid quoting issues
-            update_script_content = '''#!/bin/bash
-# COMPLETELY ISOLATED UPDATE SCRIPT
-exec setsid bash -c '
-    exec 0</dev/null
-    exec 1>/tmp/update.log
-    exec 2>&1
-    
-    trap "" HUP INT QUIT TERM USR1 USR2 PIPE CHLD
-    
-    echo "===== Controller Update Started: $(date) ====="
-    echo "Running in complete isolation from service"
-    echo "Process PID: $"
-    echo "Session ID: $(ps -o sid= -p $)"
-    
-    echo "{\\"pid\\": $, \\"status\\": \\"starting\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-    
-    cd /tmp
-    echo "Downloading new script..."
-    
-    if wget -q -O install-controller-proxy.sh.new https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
-        echo "Download successful"
-        chmod +x install-controller-proxy.sh.new
-        mv install-controller-proxy.sh.new install-controller-proxy.sh
-        
-        echo "{\\"pid\\": $, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        
-        echo "Executing new script..."
-        
-        if timeout 600 ./install-controller-proxy.sh; then
-            echo "Installation completed successfully"
-            echo "{\\"pid\\": $, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        else
-            echo "Installation failed or timed out"
-            echo "{\\"pid\\": $, \\"status\\": \\"failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        fi
-        
-    else
-        echo "Download failed"
-        echo "{\\"pid\\": $, \\"status\\": \\"download_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-    fi
-    
-    echo "Update process finished at $(date)"
-    
-    sleep 10
-    rm -f /tmp/update-controller.sh /tmp/update.lock
-    
-' &
-
-exit 0
+            # Create a temporary script to handle the update
+            update_script = '''#!/bin/bash
+set -e
+# Sleep to allow HTTP response to be sent first
+sleep 2
+echo "Starting controller update..." > /tmp/update.log 2>&1
+cd /tmp
+wget -O install-controller-proxy.sh https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh >> /tmp/update.log 2>&1
+chmod +x install-controller-proxy.sh
+echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
+./install-controller-proxy.sh >> /tmp/update.log 2>&1
+echo "Update completed successfully" >> /tmp/update.log 2>&1
+# Clean up
+rm -f /tmp/update-controller.sh
 '''
             
             # Write the update script
             with open('/tmp/update-controller.sh', 'w') as f:
-                f.write(update_script_content)
+                f.write(update_script)
             
             # Make it executable
-            os.chmod('/tmp/update-controller.sh', 0o755)
+            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
-            # Start the completely detached process using simple subprocess
-            process = subprocess.Popen(
-                ['/bin/bash', '/tmp/update-controller.sh'],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True
-            )
+            # Start the update process in the background (fire and forget)
+            subprocess.Popen(['/tmp/update-controller.sh'], 
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL,
+                           start_new_session=True)
             
+            # Return immediately while update runs in background
             return {
                 'operation': 'controller_update',
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Update process started with complete daemon isolation.',
+                'output': 'Update process started in background. Service will restart automatically.',
                 'stdout': 'Update initiated successfully',
                 'stderr': '',
                 'timestamp': current_time,
-                'message': 'Controller update initiated with complete service isolation',
-                'notes': 'Update is running as a completely detached daemon process. Check /tmp/update.log for progress. The service will not be affected during the update.'
+                'message': 'Controller update initiated successfully',
+                'notes': 'Update is running in background. Check /tmp/update.log for progress. Service will restart automatically when complete.'
             }
             
         except Exception as e:
-            # Clean up lock file on error
-            try:
-                os.remove(lock_file)
-            except:
-                pass
-                
             return {
                 'operation': 'controller_update',
                 'status': 'error',
@@ -473,109 +528,9 @@ exit 0
                 'message': f'Update initiation failed: {str(e)}',
                 'notes': 'Failed to start the background update process.'
             }
-    
-    def _get_update_log(self):
-        """Get the contents of the update log file and lock status"""
-        try:
-            current_time = self._get_current_time()
-            log_file = '/tmp/update.log'
-            lock_file = '/tmp/update.lock'
-            
-            # Check lock file for status
-            lock_status = None
-            if os.path.exists(lock_file):
-                try:
-                    with open(lock_file, 'r') as f:
-                        lock_status = json.load(f)
-                except:
-                    pass
-            
-            if not os.path.exists(log_file):
-                return {
-                    'operation': 'get_update_log',
-                    'status': 'no_log',
-                    'success': True,
-                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                    'log_content': '',
-                    'log_lines': [],
-                    'file_size': 0,
-                    'last_modified': None,
-                    'lock_status': lock_status,
-                    'timestamp': current_time,
-                    'message': 'No update log file found',
-                    'notes': 'Update log will be created when an update is initiated.'
-                }
-            
-            stat = os.stat(log_file)
-            file_size = stat.st_size
-            last_modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-            
-            try:
-                with open(log_file, 'r') as f:
-                    log_content = f.read()
-                
-                log_lines = log_content.strip().split('\n') if log_content.strip() else []
-                
-                # Determine status from log content and lock file
-                if lock_status:
-                    status = lock_status.get('status', 'unknown')
-                elif 'Installation completed' in log_content:
-                    status = 'completed_success'
-                elif 'failed' in log_content.lower() or 'error' in log_content.lower():
-                    status = 'completed_error'
-                elif log_content.strip():
-                    status = 'in_progress'
-                else:
-                    status = 'empty'
-                
-                return {
-                    'operation': 'get_update_log',
-                    'status': status,
-                    'success': True,
-                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                    'log_content': log_content,
-                    'log_lines': log_lines,
-                    'line_count': len(log_lines),
-                    'file_size': file_size,
-                    'last_modified': last_modified,
-                    'lock_status': lock_status,
-                    'timestamp': current_time,
-                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
-                    'notes': f'Log file last modified: {last_modified}'
-                }
-                
-            except Exception as read_error:
-                return {
-                    'operation': 'get_update_log',
-                    'status': 'read_error',
-                    'success': False,
-                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                    'log_content': '',
-                    'log_lines': [],
-                    'file_size': file_size,
-                    'last_modified': last_modified,
-                    'lock_status': lock_status,
-                    'error': str(read_error),
-                    'timestamp': current_time,
-                    'message': f'Failed to read update log: {str(read_error)}',
-                    'notes': 'Log file exists but could not be read.'
-                }
-                
-        except Exception as e:
-            return {
-                'operation': 'get_update_log',
-                'status': 'error',
-                'success': False,
-                'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                'log_content': '',
-                'log_lines': [],
-                'error': str(e),
-                'timestamp': self._get_current_time(),
-                'message': f'Failed to access update log: {str(e)}',
-                'notes': 'An error occurred while trying to access the log file.'
-            }
-    
+        
     def _get_health_data(self):
+        # Get basic info first
         current_time = self._get_current_time()
         server_ip = self._get_server_ip()
         
@@ -609,12 +564,13 @@ exit 0
         
         overall_status = 'pass'
         
-        # CPU monitoring
+        # Simplified CPU monitoring (removed time.sleep that was causing issues)
         try:
             with open('/proc/loadavg', 'r') as f:
                 load_avg = f.read().strip().split()
                 load_1min = float(load_avg[0])
                 
+            import os
             cpu_count = os.cpu_count() or 1
             load_per_cpu = load_1min / cpu_count
             
@@ -643,7 +599,7 @@ exit 0
             }
             overall_status = 'fail'
         
-        # Memory monitoring
+        # Enhanced memory monitoring
         try:
             with open('/proc/meminfo', 'r') as f:
                 meminfo = f.read()
@@ -703,7 +659,7 @@ exit 0
             }
             overall_status = 'fail'
         
-        # Network monitoring
+        # Network statistics monitoring
         try:
             network_stats = self._get_network_stats()
             
@@ -757,7 +713,7 @@ exit 0
             }
             overall_status = 'fail'
         
-        # Service checks
+        # Check services for health status
         services = ['pod.service', 'xandminer.service', 'xandminerd.service']
         for service in services:
             try:
@@ -788,7 +744,7 @@ exit 0
                 }
                 overall_status = 'fail'
         
-        # Application endpoint checks
+        # Check application endpoints
         try:
             response = requests.get('http://localhost:80/stats', timeout=5)
             if response.status_code == 200:
@@ -843,6 +799,7 @@ exit 0
         self.wfile.write(json_response.encode('utf-8'))
     
     def do_GET(self):
+        # Check IP whitelist first
         if not self._check_ip_allowed():
             return
             
@@ -886,24 +843,116 @@ exit 0
                 self._send_json_response(versions_data)
                 
             elif self.path == '/restart/pod':
-                status_data = self._restart_pod_service()
-                self._send_json_response(status_data)
+                try:
+                    status_data = self._restart_pod_service()
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))
                 
             elif self.path == '/restart/xandminer':
-                status_data = self._restart_service('xandminer.service')
-                self._send_json_response(status_data)
+                try:
+                    status_data = self._restart_service('xandminer.service')
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))
                     
             elif self.path == '/restart/xandminerd':
-                status_data = self._restart_service('xandminerd.service')
-                self._send_json_response(status_data)
+                try:
+                    status_data = self._restart_service('xandminerd.service')
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(status_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    self.send_error(500, str(e))
                     
             elif self.path == '/update/controller':
-                update_data = self._update_controller()
-                self._send_json_response(update_data)
+                try:
+                    update_data = self._update_controller()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(update_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'controller_update',
+                        'status': 'exception',
+                        'return_code': -1,
+                        'success': False,
+                        'output': f'Endpoint exception: {str(e)}',
+                        'stdout': '',
+                        'stderr': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Update endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the update endpoint itself.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
                     
             elif self.path == '/update/controller/log':
-                log_data = self._get_update_log()
-                self._send_json_response(log_data)
+                try:
+                    log_data = self._get_update_log()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(log_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'get_update_log',
+                        'status': 'exception',
+                        'success': False,
+                        'log_content': '',
+                        'log_lines': [],
+                        'error': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Update log endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the update log endpoint.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))               
                 
             else:
                 self.send_error(404, "Not Found")
@@ -913,49 +962,25 @@ exit 0
             self.send_error(500, str(e))
     
     def log_message(self, format, *args):
+        # Log requests with IP addresses for security monitoring
         client_ip = self.client_address[0]
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
-        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
+        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
 PORT = 3001
-
-# Global variable to track if we should exit gracefully
-should_exit = False
-
-def signal_handler(signum, frame):
-    global should_exit
-    print(f"Received signal {signum}, initiating graceful shutdown...")
-    should_exit = True
-
 if __name__ == "__main__":
-    # Set up signal handlers for graceful shutdown
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
     try:
         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
         print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
-        
-        # Use a custom TCPServer that can handle graceful shutdown
-        class GracefulTCPServer(socketserver.TCPServer):
-            def serve_forever(self):
-                while not should_exit:
-                    self.handle_request()
-                print("Server shutting down gracefully...")
-        
-        with GracefulTCPServer(("", PORT), ReadOnlyHandler) as httpd:
-            httpd.timeout = 1  # Check for shutdown every second
+        with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
             httpd.serve_forever()
-            
     except KeyboardInterrupt:
-        print("Server stopped by keyboard interrupt")
+        print("Server stopped")
+        sys.exit(0)
     except Exception as e:
         print(f"Failed to start server: {e}")
         sys.exit(1)
-    finally:
-        print("JSON proxy service stopped")
-        sys.exit(0)
 EOF
 
     chmod +x /opt/json-proxy.py
@@ -978,9 +1003,6 @@ WorkingDirectory=/opt
 ExecStart=/usr/bin/python3 /opt/json-proxy.py
 Restart=always
 RestartSec=3
-TimeoutStopSec=10
-KillMode=mixed
-KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 
@@ -988,70 +1010,30 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-    log "Systemd service file created with proper timeout settings"
+    log "Systemd service file created"
 }
 
-# Enable and start the service - IMPROVED VERSION with better process management
+# Enable and start the service
 setup_service() {
-    # Protect this critical section from signals that could interrupt the installation
-    trap '' HUP INT QUIT TERM USR1 USR2
-    
     log "Reloading systemd daemon..."
     systemctl daemon-reload
     
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
     
-    # Check if service is already running and handle properly
+    # Check if service is already running and restart if so, otherwise start fresh
     if systemctl is-active --quiet json-proxy.service; then
-        log "Stopping existing json-proxy service to avoid conflicts..."
-        
-        # Send SIGTERM and wait for graceful shutdown
-        systemctl stop json-proxy.service
-        
-        # Wait for service to fully stop with timeout
-        local stop_attempts=0
-        while systemctl is-active --quiet json-proxy.service && [ $stop_attempts -lt 15 ]; do
-            log "Waiting for service to stop gracefully... (attempt $((stop_attempts + 1))/15)"
-            sleep 2
-            stop_attempts=$((stop_attempts + 1))
-        done
-        
-        # If still running, force kill
-        if systemctl is-active --quiet json-proxy.service; then
-            warn "Service did not stop gracefully, forcing termination..."
-            systemctl kill --signal=SIGKILL json-proxy.service
-            sleep 3
-            
-            # Final check
-            if systemctl is-active --quiet json-proxy.service; then
-                error "Could not stop the existing service. Manual intervention required."
-                systemctl status json-proxy.service --no-pager
-                exit 1
-            fi
-        fi
-        
-        log "Previous service stopped successfully"
+        log "Service is already running, restarting to pick up new script..."
+        systemctl restart json-proxy.service
+    else
+        log "Starting json-proxy service..."
+        systemctl start json-proxy.service
     fi
     
-    log "Starting json-proxy service with new script..."
-    systemctl start json-proxy.service
-    
-    # Wait for service to start with verification
+    # Wait a moment for service to start
     sleep 3
     
-    # Verify service started successfully
-    local start_attempts=0
-    while ! systemctl is-active --quiet json-proxy.service && [ $start_attempts -lt 10 ]; do
-        log "Waiting for service to start... (attempt $((start_attempts + 1))/10)"
-        sleep 2
-        start_attempts=$((start_attempts + 1))
-    done
-    
-    # Restore normal signal handling
-    trap cleanup INT TERM
-    
-    log "Checking final service status..."
+    log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is running successfully"
         
@@ -1061,19 +1043,10 @@ setup_service() {
             start_time=$(ps -o lstart= -p "$service_pid" 2>/dev/null || echo "unknown")
             log "Service PID: $service_pid, Started: $start_time"
         fi
-        
-        # Test basic connectivity
-        sleep 2
-        if curl -s -f -m 5 "http://localhost:3001/health" > /dev/null 2>&1; then
-            log "Service health check: PASSED"
-        else
-            warn "Service health check: FAILED (may need more time to initialize)"
-        fi
     else
-        error "Service failed to start properly"
+        warn "Service may not be running properly"
         systemctl status json-proxy.service --no-pager
-        error "Check logs with: journalctl -u json-proxy.service -f"
-        exit 1
+        warn "Check logs with: journalctl -u json-proxy.service -f"
     fi
 }
 
@@ -1119,10 +1092,6 @@ setup_firewall() {
     # Home
     ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
     log "Added rule for Home: 174.114.192.84"
-    
-    # Home (secondary IP)
-    ufw allow from 67.70.165.78 to any port 3001 comment 'Home Secondary'
-    log "Added rule for Home (secondary): 67.70.165.78"
     
     # Allow localhost access
     ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
@@ -1273,20 +1242,11 @@ show_completion_info() {
     echo "    * 74.208.234.116 (Master - USA)"
     echo "    * 85.215.145.173 (Control2 - Germany)"
     echo "    * 194.164.163.124 (Control3 - Spain)"
-    echo "    * 174.114.192.84 (Home - add your actual IP here)"
-    echo "    * 67.70.165.78 (Home - secondary IP)"
+    echo "    * 174.114.192.84 (Home)"
     echo "    * 127.0.0.1 (Localhost)"
     echo "  - All other IPs will receive 403 Forbidden"
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
-    echo
-    info "v1.0.85 - Executes the Exact GitHub Command:"
-    echo "  - /update/controller now runs: wget -O - https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh | bash"
-    echo "  - Simple wrapper script executes the exact command that works manually"
-    echo "  - No complex download/save/execute - direct pipe execution"
-    echo "  - Maintains lock file system to prevent concurrent updates"
-    echo "  - Logs output to /tmp/update.log for monitoring"
-    echo "  - Uses nohup + start_new_session for background execution"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
@@ -1296,6 +1256,7 @@ show_completion_info() {
     echo "  - Application endpoint checks (stats, versions)"
     echo "  - RFC-compliant response format"
     echo "  - Proxy version tracking"
+    echo "  - Disk space monitoring: DISABLED (commented out)"
     echo
     info "Useful Commands:"
     echo "  - Check service status: systemctl status json-proxy.service"
@@ -1313,7 +1274,7 @@ show_completion_info() {
     echo "  curl -s http://localhost:3001/health | jq '.chillxand_controller_version'"
     echo "  curl -s http://localhost:3001/versions | jq '.data.chillxand_controller'"
     echo
-    log "Installation completed successfully with COMPLETE update isolation!"
+    log "Installation completed successfully!"
 }
 
 # Cleanup function for script interruption
@@ -1326,7 +1287,7 @@ cleanup() {
 main() {
     trap cleanup INT TERM
     
-    log "Starting JSON Proxy Service Installation (v${CHILLXAND_VERSION})..."
+    log "Starting JSON Proxy Service Installation..."
     
     check_root
     install_dependencies
