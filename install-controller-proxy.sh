@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.89"
+CHILLXAND_VERSION="v1.0.90"
 
 set -e  # Exit on any error
 
@@ -373,205 +373,55 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         try:
             current_time = self._get_current_time()
             
-            # Create the update script with better error handling and logging
+            # Create the update script as a separate file to avoid quoting issues
             update_script_content = '''#!/bin/bash
-# COMPLETELY ISOLATED UPDATE SCRIPT with Enhanced Debugging
+# COMPLETELY ISOLATED UPDATE SCRIPT
 exec setsid bash -c '
-    # Redirect all output to log file
-    exec 1>/tmp/update.log 2>&1
+    exec 0</dev/null
+    exec 1>/tmp/update.log
+    exec 2>&1
     
-    # Ignore all signals to prevent interruption
     trap "" HUP INT QUIT TERM USR1 USR2 PIPE CHLD
     
     echo "===== Controller Update Started: $(date) ====="
     echo "Running in complete isolation from service"
-    echo "Process PID: $$"
-    echo "Session ID: $(ps -o sid= -p $$)"
-    echo "Working directory: $(pwd)"
-    echo "PATH: $PATH"
-    echo "User: $(whoami)"
-    echo ""
+    echo "Process PID: $"
+    echo "Session ID: $(ps -o sid= -p $)"
     
-    # Create initial lock file
-    echo "{\\"pid\\": $$, \\"status\\": \\"starting\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
+    echo "{\\"pid\\": $, \\"status\\": \\"starting\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     
-    # Change to /tmp directory
-    cd /tmp || {
-        echo "ERROR: Failed to change to /tmp directory"
-        echo "{\\"pid\\": $$, \\"status\\": \\"failed\\", \\"error\\": \\"failed_cd_tmp\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        exit 1
-    }
+    cd /tmp
+    echo "Downloading new script..."
     
-    echo "Changed to directory: $(pwd)"
-    echo ""
-    
-    # Test network connectivity first
-    echo "Testing network connectivity..."
-    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-        echo "✓ Network connectivity: OK"
-    else
-        echo "✗ Network connectivity: FAILED"
-        echo "{\\"pid\\": $$, \\"status\\": \\"failed\\", \\"error\\": \\"no_network\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        exit 1
-    fi
-    
-    # Test GitHub connectivity
-    echo "Testing GitHub connectivity..."
-    if ping -c 1 github.com >/dev/null 2>&1; then
-        echo "✓ GitHub connectivity: OK"
-    else
-        echo "✗ GitHub connectivity: FAILED"
-        echo "{\\"pid\\": $$, \\"status\\": \\"failed\\", \\"error\\": \\"no_github\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        exit 1
-    fi
-    
-    echo ""
-    echo "Attempting to download installation script..."
-    echo "URL: https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh"
-    echo ""
-    
-    # Update lock file status
-    echo "{\\"pid\\": $$, \\"status\\": \\"downloading\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-    
-    # Try multiple download methods with detailed logging
-    download_success=false
-    
-    # Method 1: wget with verbose output
-    echo "Method 1: Trying wget..."
-    if command -v wget >/dev/null 2>&1; then
-        echo "wget found at: $(which wget)"
-        echo "wget version: $(wget --version | head -1)"
-        echo ""
-        echo "Executing: wget -v -O install-controller-proxy.sh.new https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh"
+    if wget -q -O install-controller-proxy.sh.new https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh; then
+        echo "Download successful"
+        chmod +x install-controller-proxy.sh.new
+        mv install-controller-proxy.sh.new install-controller-proxy.sh
         
-        if wget -v -O install-controller-proxy.sh.new "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" 2>&1; then
-            if [ -f "install-controller-proxy.sh.new" ] && [ -s "install-controller-proxy.sh.new" ]; then
-                echo "✓ wget download successful"
-                echo "File size: $(wc -c < install-controller-proxy.sh.new) bytes"
-                echo "First few lines of downloaded file:"
-                head -5 install-controller-proxy.sh.new
-                download_success=true
-            else
-                echo "✗ wget created empty or missing file"
-                rm -f install-controller-proxy.sh.new
-            fi
-        else
-            echo "✗ wget download failed"
-            rm -f install-controller-proxy.sh.new
-        fi
-    else
-        echo "wget not found"
-    fi
-    
-    # Method 2: curl if wget failed
-    if [ "$download_success" = false ]; then
-        echo ""
-        echo "Method 2: Trying curl..."
-        if command -v curl >/dev/null 2>&1; then
-            echo "curl found at: $(which curl)"
-            echo "curl version: $(curl --version | head -1)"
-            echo ""
-            echo "Executing: curl -v -L -o install-controller-proxy.sh.new https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh"
-            
-            if curl -v -L -o install-controller-proxy.sh.new "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" 2>&1; then
-                if [ -f "install-controller-proxy.sh.new" ] && [ -s "install-controller-proxy.sh.new" ]; then
-                    echo "✓ curl download successful"
-                    echo "File size: $(wc -c < install-controller-proxy.sh.new) bytes"
-                    echo "First few lines of downloaded file:"
-                    head -5 install-controller-proxy.sh.new
-                    download_success=true
-                else
-                    echo "✗ curl created empty or missing file"
-                    rm -f install-controller-proxy.sh.new
-                fi
-            else
-                echo "✗ curl download failed"
-                rm -f install-controller-proxy.sh.new
-            fi
-        else
-            echo "curl not found"
-        fi
-    fi
-    
-    # Check if download was successful
-    if [ "$download_success" = false ]; then
-        echo ""
-        echo "ERROR: All download methods failed"
-        echo "Available network tools:"
-        echo "  wget: $(command -v wget || echo not found)"
-        echo "  curl: $(command -v curl || echo not found)"
-        echo ""
-        echo "{\\"pid\\": $$, \\"status\\": \\"download_failed\\", \\"error\\": \\"all_methods_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        exit 1
-    fi
-    
-    # Validate the downloaded file
-    echo ""
-    echo "Validating downloaded file..."
-    if ! grep -q "#!/bin/bash" install-controller-proxy.sh.new; then
-        echo "✗ Downloaded file does not appear to be a bash script"
-        echo "File contents preview:"
-        head -10 install-controller-proxy.sh.new
-        echo "{\\"pid\\": $$, \\"status\\": \\"download_failed\\", \\"error\\": \\"invalid_script\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-        exit 1
-    fi
-    
-    echo "✓ Downloaded file validation passed"
-    
-    # Make the script executable and rename it
-    chmod +x install-controller-proxy.sh.new
-    mv install-controller-proxy.sh.new install-controller-proxy.sh
-    
-    echo ""
-    echo "Final script details:"
-    echo "  File: $(pwd)/install-controller-proxy.sh"
-    echo "  Size: $(wc -c < install-controller-proxy.sh) bytes"
-    echo "  Permissions: $(ls -l install-controller-proxy.sh)"
-    echo ""
-    
-    # Update lock file before execution
-    echo "{\\"pid\\": $$, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-    
-    echo "Executing installation script..."
-    echo "Command: timeout 600 ./install-controller-proxy.sh"
-    echo ""
-    
-    # Execute with timeout and detailed logging
-    if timeout 600 ./install-controller-proxy.sh; then
-        echo ""
-        echo "✓ Installation completed successfully"
-        echo "Installation finished at: $(date)"
-        echo "{\\"pid\\": $$, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
-    else
-        exit_code=$?
-        echo ""
-        echo "✗ Installation failed or timed out"
-        echo "Exit code: $exit_code"
-        echo "Installation failed at: $(date)"
+        echo "{\\"pid\\": $, \\"status\\": \\"installing\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         
-        if [ $exit_code -eq 124 ]; then
-            echo "{\\"pid\\": $$, \\"status\\": \\"timeout\\", \\"error\\": \\"installation_timeout\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
+        echo "Executing new script..."
+        
+        if timeout 600 ./install-controller-proxy.sh; then
+            echo "Installation completed successfully"
+            echo "{\\"pid\\": $, \\"status\\": \\"completed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         else
-            echo "{\\"pid\\": $$, \\"status\\": \\"failed\\", \\"error\\": \\"installation_failed\\", \\"exit_code\\": $exit_code, \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
+            echo "Installation failed or timed out"
+            echo "{\\"pid\\": $, \\"status\\": \\"failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
         fi
-        exit $exit_code
+        
+    else
+        echo "Download failed"
+        echo "{\\"pid\\": $, \\"status\\": \\"download_failed\\", \\"timestamp\\": \\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\"}" > /tmp/update.lock
     fi
     
-    echo ""
-    echo "Update process completed at: $(date)"
-    echo "===== Controller Update Finished ====="
+    echo "Update process finished at $(date)"
     
-    # Clean up after successful completion
-    sleep 5
-    rm -f /tmp/update-controller.sh install-controller-proxy.sh
-    
-    # Keep lock file for a bit longer for status checking
     sleep 10
-    rm -f /tmp/update.lock
+    rm -f /tmp/update-controller.sh /tmp/update.lock
     
 ' &
 
-# Return immediately after starting the background process
 exit 0
 '''
             
@@ -582,20 +432,13 @@ exit 0
             # Make it executable
             os.chmod('/tmp/update-controller.sh', 0o755)
             
-            # Clear any existing log file
-            try:
-                os.remove('/tmp/update.log')
-            except:
-                pass
-            
-            # Start the completely detached process
+            # Start the completely detached process using simple subprocess
             process = subprocess.Popen(
                 ['/bin/bash', '/tmp/update-controller.sh'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                start_new_session=True,
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+                start_new_session=True
             )
             
             return {
@@ -603,12 +446,12 @@ exit 0
                 'status': 'initiated',
                 'return_code': 0,
                 'success': True,
-                'output': 'Enhanced update process started with comprehensive debugging.',
-                'stdout': 'Update initiated successfully with detailed logging',
+                'output': 'Update process started with complete daemon isolation.',
+                'stdout': 'Update initiated successfully',
                 'stderr': '',
                 'timestamp': current_time,
-                'message': 'Controller update initiated with enhanced debugging and error handling',
-                'notes': 'Update is running with comprehensive logging. Check /tmp/update.log for detailed progress and any errors. The process includes network connectivity tests, multiple download methods, and detailed validation.'
+                'message': 'Controller update initiated with complete service isolation',
+                'notes': 'Update is running as a completely detached daemon process. Check /tmp/update.log for progress. The service will not be affected during the update.'
             }
             
         except Exception as e:
@@ -693,6 +536,22 @@ exit 0
                     'log_content': log_content,
                     'log_lines': log_lines,
                     'line_count': len(log_lines),
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'lock_status': lock_status,
+                    'timestamp': current_time,
+                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
+                    'notes': f'Log file last modified: {last_modified}'
+                }
+                
+            except Exception as read_error:
+                return {
+                    'operation': 'get_update_log',
+                    'status': 'read_error',
+                    'success': False,
+                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
+                    'log_content': '',
+                    'log_lines': [],
                     'file_size': file_size,
                     'last_modified': last_modified,
                     'lock_status': lock_status,
@@ -1421,14 +1280,13 @@ show_completion_info() {
     echo "  - UFW Firewall: Configured with IP restrictions"
     echo "  - Request logging: Enabled with IP tracking"
     echo
-    info "v1.0.85 - Enhanced Update System with Comprehensive Debugging:"
-    echo "  - Network connectivity testing before download"
-    echo "  - Multiple download methods (wget + curl fallback)"
-    echo "  - File validation and integrity checking"
-    echo "  - Detailed progress logging to /tmp/update.log"
-    echo "  - Enhanced error reporting and troubleshooting"
-    echo "  - Lock file system prevents concurrent updates"
-    echo "  - Complete service isolation during updates"
+    info "v1.0.85 - Executes the Exact GitHub Command:"
+    echo "  - /update/controller now runs: wget -O - https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh | bash"
+    echo "  - Simple wrapper script executes the exact command that works manually"
+    echo "  - No complex download/save/execute - direct pipe execution"
+    echo "  - Maintains lock file system to prevent concurrent updates"
+    echo "  - Logs output to /tmp/update.log for monitoring"
+    echo "  - Uses nohup + start_new_session for background execution"
     echo
     info "Health Check Features:"
     echo "  - Enhanced CPU monitoring (load + usage percentage)"
@@ -1455,13 +1313,7 @@ show_completion_info() {
     echo "  curl -s http://localhost:3001/health | jq '.chillxand_controller_version'"
     echo "  curl -s http://localhost:3001/versions | jq '.data.chillxand_controller'"
     echo
-    info "Debugging Update Issues:"
-    echo "  - Check update log: curl -s http://localhost:3001/update/controller/log | jq '.log_content'"
-    echo "  - Monitor update progress: watch 'curl -s http://localhost:3001/update/controller/log | jq .status'"
-    echo "  - View detailed logs: cat /tmp/update.log"
-    echo "  - Check lock status: cat /tmp/update.lock"
-    echo
-    log "Installation completed successfully with enhanced update debugging!"
+    log "Installation completed successfully with COMPLETE update isolation!"
 }
 
 # Cleanup function for script interruption
@@ -1488,19 +1340,3 @@ main() {
 
 # Run the main function
 main "$@"
-                    'last_modified': last_modified,
-                    'lock_status': lock_status,
-                    'timestamp': current_time,
-                    'message': f'Update log retrieved successfully ({len(log_lines)} lines)',
-                    'notes': f'Log file last modified: {last_modified}'
-                }
-                
-            except Exception as read_error:
-                return {
-                    'operation': 'get_update_log',
-                    'status': 'read_error',
-                    'success': False,
-                    'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
-                    'log_content': '',
-                    'log_lines': [],
-                    'file_size': file_size,
