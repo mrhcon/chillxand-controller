@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.112"
+CHILLXAND_VERSION="v1.0.113"
 
 set -e  # Exit on any error
 
@@ -574,7 +574,7 @@ rm -f /tmp/update-controller.sh
                 },
                 'timestamp': current_time,
                 'message': message,
-                'notes': 'Update runs in background. Check /tmp/update.log for progress.' if initiate_update else 'No update process started.'
+                'notes': f'Update initiated in background. Monitor progress and completion status at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.'
             }                
         except Exception as e:
             return {
