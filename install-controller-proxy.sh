@@ -126,6 +126,7 @@ ALLOWED_IPS = {
     '85.215.145.173',   # Control2 (Germany)
     '194.164.163.124',  # Control3 (Spain)
     '174.114.192.84',   # Home
+    '67.70.165.78',     # Home #2
     '127.0.0.1',        # Localhost
     '::1'               # IPv6 localhost
 }
@@ -1093,6 +1094,10 @@ setup_firewall() {
     # Home
     ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
     log "Added rule for Home: 174.114.192.84"
+
+    # Home #2
+    ufw allow from 67.70.165.78 to any port 3001 comment 'Home'
+    log "Added rule for Home #2: 67.70.165.78"
     
     # Allow localhost access
     ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
@@ -1244,6 +1249,7 @@ show_completion_info() {
     echo "    * 85.215.145.173 (Control2 - Germany)"
     echo "    * 194.164.163.124 (Control3 - Spain)"
     echo "    * 174.114.192.84 (Home)"
+    echo "    * 67.70.165.78 (Home #2)"    
     echo "    * 127.0.0.1 (Localhost)"
     echo "  - All other IPs will receive 403 Forbidden"
     echo "  - UFW Firewall: Configured with IP restrictions"
