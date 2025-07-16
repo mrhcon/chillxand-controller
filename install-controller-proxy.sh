@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.109"
+CHILLXAND_VERSION="v1.0.110"
 
 set -e  # Exit on any error
 
@@ -501,10 +501,17 @@ rm -f /tmp/update-controller.sh
             subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
             
             # Start the update process in the background (fire and forget)
-            subprocess.Popen(['/tmp/update-controller.sh'], 
-                           stdout=subprocess.DEVNULL, 
-                           stderr=subprocess.DEVNULL,
-                           start_new_session=True)
+            # subprocess.Popen(['/tmp/update-controller.sh'], 
+            #                stdout=subprocess.DEVNULL, 
+            #                stderr=subprocess.DEVNULL,
+            #                start_new_session=True)
+            # Instead of subprocess.Popen, use systemd-run
+            subprocess.run([
+                'systemd-run', 
+                '--scope', 
+                '--user=root',
+                '/tmp/update-controller.sh'
+            ], timeout=5)
             
             # Return immediately while update runs in background
             return {
