@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.136"
+CHILLXAND_VERSION="v1.0.137"
 
 set -e  # Exit on any error
 
@@ -488,13 +488,25 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 random_num = str(random.randint(1, 10000))
                 cache_bust = f"{timestamp}_{random_num}"
     
-                # Get latest version from GitHub using the same cache-busting            
+                # Get latest version from GitHub using proper curl cache-busting            
                 result = subprocess.run([
-                    'bash', '-c',
-                    f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={cache_bust}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
+                    'curl', '-s', 
+                    '-H', 'Cache-Control: no-cache',
+                    '-H', 'Pragma: no-cache',
+                    f'https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}'
                 ], capture_output=True, text=True, timeout=30)
                 
-                github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+                if result.returncode == 0 and result.stdout:
+                    # Parse the version from the downloaded content
+                    for line in result.stdout.split('\n'):
+                        if 'CHILLXAND_VERSION=' in line and line.strip().startswith('CHILLXAND_VERSION='):
+                            # Extract version: CHILLXAND_VERSION="v1.0.135"
+                            github_version = line.split('"')[1] if '"' in line else "unknown"
+                            break
+                    else:
+                        github_version = "unknown"
+                else:
+                    github_version = "unknown"
                 
             except Exception as e:
                 github_version = f"error: {str(e)}"                     
