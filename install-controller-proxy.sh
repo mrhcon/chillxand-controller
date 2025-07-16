@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.132"
+CHILLXAND_VERSION="v1.0.133"
 
 set -e  # Exit on any error
 
@@ -473,31 +473,31 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Update the controller script from GitHub - Fire and forget method"""
         try:
             current_time = self._get_current_time()
-
+    
             # Get current installed version
             current_version = CHILLXAND_CONTROLLER_VERSION
-
+    
             # Get latest version from GitHub
             try:
                 import subprocess
                 import time
                 import random
-
+    
                 # Generate cache-busting values in Python      
                 timestamp = str(int(time.time()))          
                 random_num = str(random.randint(1, 10000))
                 cache_bust = f"{timestamp}_{random_num}"
-
-                # Get latest version from GitHub using the same cache-busting
-                try:                
-                    result = subprocess.run([
-                        'bash', '-c',
-                        f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={cache_bust}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
-                    ], capture_output=True, text=True, timeout=30)
-                    
-                    github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
-                except Exception as e:
-                github_version = f"error: {str(e)}"                
+    
+                # Get latest version from GitHub using the same cache-busting            
+                result = subprocess.run([
+                    'bash', '-c',
+                    f'curl -s --no-cache "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cache_bust={cache_bust}" | grep "CHILLXAND_VERSION=" | head -1 | cut -d\'"\' -f2'
+                ], capture_output=True, text=True, timeout=30)
+                
+                github_version = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+                
+            except Exception as e:
+                github_version = f"error: {str(e)}"                     
             
             # Determine if update is needed
             update_needed = github_version != current_version and not github_version.startswith("error:")
