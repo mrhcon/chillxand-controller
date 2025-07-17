@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.162"
+CHILLXAND_VERSION="v1.0.163"
 
 set -e  # Exit on any error
 
@@ -607,10 +607,30 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     echo "File list: $(ls -la install-controller-proxy.sh)" >> /tmp/update.log 2>&1
     echo "File content check: $(head -1 install-controller-proxy.sh)" >> /tmp/update.log 2>&1
     
-    # Replace your entire version extraction with just this single line:
-    DOWNLOADED_VERSION=$(grep "CHILLXAND_VERSION=" install-controller-proxy.sh | head -1 | cut -d'"' -f2)
-    echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+    # Replace your version extraction with this (proper quote escaping):
     
+    echo "Extracting version with proper quote handling..." >> /tmp/update.log 2>&1
+    
+    # Method 1: Use single quotes to avoid quote interpretation issues
+    DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | cut -d'"' -f2)
+    echo "Method 1 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    
+    # Method 2: If that fails, escape the quotes differently
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Method 1 failed, trying escaped quotes..." >> /tmp/update.log 2>&1
+        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep CHILLXAND_VERSION= | cut -d\" -f2)
+        echo "Method 2 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    fi
+    
+    # Method 3: Use a different delimiter approach
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Method 2 failed, trying different approach..." >> /tmp/update.log 2>&1
+        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep CHILLXAND_VERSION | sed 's/.*"\(.*\)".*/\1/')
+        echo "Method 3 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    fi
+    
+    echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+   
     chmod +x install-controller-proxy.sh
     echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
 
