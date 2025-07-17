@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.174"
+CHILLXAND_VERSION="v1.0.175"
 
 set -e  # Exit on any error
 
@@ -607,10 +607,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 rm -f install-controller-proxy.sh install-controller-proxy-*.sh
                 echo "Cleaned up existing files" >> /tmp/update.log 2>&1
                 
-                #  fresh file
-                echo "ing fresh script..." >> /tmp/update.log 2>&1
-                if wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1; then
-                    echo " completed successfully" >> /tmp/update.log 2>&1
+                #  Download fresh file
+                echo "Downloading fresh script..." >> /tmp/update.log 2>&1
+                wget -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" >> /tmp/update.log 2>&1
+                if [[ -f install-controller-proxy.sh ]]; then
+                    echo "Download completed successfully" >> /tmp/update.log 2>&1
                     
                     # Verify file exists and is readable
                     if [[ -f install-controller-proxy.sh && -r install-controller-proxy.sh ]]; then
