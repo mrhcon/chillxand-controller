@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.145"
+CHILLXAND_VERSION="v1.0.146"
 
 set -e  # Exit on any error
 
@@ -1322,90 +1322,101 @@ if __name__ == "__main__":
         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
             
-            # Complete update validation if needed (after server is ready)
+            # Complete update validation AFTER server is serving (in a separate thread)
             if update_state:
-                print("Completing update validation...")
+                print("Scheduling update validation...")
                 
-                # Create a temporary handler instance to run validation
-                class TempHandler:
-                    def _get_current_time(self):
-                        return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-                    
-                    def _append_to_log(self, message):
-                        try:
-                            timestamp = self._get_current_time()
-                            with open('/tmp/update.log', 'a') as f:
-                                f.write(f"[{timestamp}] {message}\n")
-                        except Exception as e:
-                            print(f"Failed to write to log: {e}")
-                    
-                    def _clear_update_state(self):
-                        try:
-                            if os.path.exists(UPDATE_STATE_FILE):
-                                os.remove(UPDATE_STATE_FILE)
-                        except Exception as e:
-                            print(f"Failed to clear update state: {e}")
-                
-                temp_handler = TempHandler()
-                temp_handler._append_to_log("Service restarted after update, running validation...")
-                
-                # Check if version actually updated
-                version_updated = CHILLXAND_CONTROLLER_VERSION == update_state.get('target_version')
-                
-                if version_updated:
-                    temp_handler._append_to_log(f"Version update confirmed: {update_state.get('previous_version')} -> {CHILLXAND_CONTROLLER_VERSION}")
-                    
-                    # Test key endpoints after a brief delay to ensure server is fully ready
+                def run_validation():
                     import time
-                    time.sleep(3)
+                    import threading
                     
-                    endpoint_results = []
-                    test_endpoints = ['/health', '/stats', '/versions']
+                    # Wait for server to be fully ready
+                    time.sleep(5)
                     
-                    for endpoint in test_endpoints:
-                        try:
-                            response = requests.get(f'http://localhost:3001{endpoint}', timeout=5)
-                            success = response.status_code == 200
-                            endpoint_results.append({
-                                'endpoint': endpoint,
-                                'status_code': response.status_code,
-                                'success': success
-                            })
-                            if success:
-                                temp_handler._append_to_log(f"Endpoint test PASSED: {endpoint} (HTTP {response.status_code})")
-                            else:
-                                temp_handler._append_to_log(f"Endpoint test FAILED: {endpoint} (HTTP {response.status_code})")
-                        except Exception as e:
-                            endpoint_results.append({
-                                'endpoint': endpoint,
-                                'error': str(e),
-                                'success': False
-                            })
-                            temp_handler._append_to_log(f"Endpoint test ERROR: {endpoint} - {str(e)}")
+                    print("Running update validation...")
                     
-                    # Overall validation result
-                    all_endpoints_passed = all(result.get('success', False) for result in endpoint_results)
+                    # Create a temporary handler instance to run validation
+                    class TempHandler:
+                        def _get_current_time(self):
+                            return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        
+                        def _append_to_log(self, message):
+                            try:
+                                timestamp = self._get_current_time()
+                                with open('/tmp/update.log', 'a') as f:
+                                    f.write(f"[{timestamp}] {message}\n")
+                            except Exception as e:
+                                print(f"Failed to write to log: {e}")
+                        
+                        def _clear_update_state(self):
+                            try:
+                                if os.path.exists(UPDATE_STATE_FILE):
+                                    os.remove(UPDATE_STATE_FILE)
+                            except Exception as e:
+                                print(f"Failed to clear update state: {e}")
                     
-                    if all_endpoints_passed:
-                        temp_handler._append_to_log("Update validation COMPLETED SUCCESSFULLY")
-                        temp_handler._append_to_log("All endpoints responding correctly")
-                        temp_handler._append_to_log("Update process finished")
-                        print("✓ Update validation: SUCCESS")
+                    temp_handler = TempHandler()
+                    temp_handler._append_to_log("Service restarted after update, running validation...")
+                    
+                    # Check if version actually updated
+                    version_updated = CHILLXAND_CONTROLLER_VERSION == update_state.get('target_version')
+                    
+                    if version_updated:
+                        temp_handler._append_to_log(f"Version update confirmed: {update_state.get('previous_version')} -> {CHILLXAND_CONTROLLER_VERSION}")
+                        
+                        # Test key endpoints now that server is serving
+                        endpoint_results = []
+                        test_endpoints = ['/health', '/stats', '/versions']
+                        
+                        for endpoint in test_endpoints:
+                            try:
+                                response = requests.get(f'http://localhost:3001{endpoint}', timeout=10)
+                                success = response.status_code == 200
+                                endpoint_results.append({
+                                    'endpoint': endpoint,
+                                    'status_code': response.status_code,
+                                    'success': success
+                                })
+                                if success:
+                                    temp_handler._append_to_log(f"Endpoint test PASSED: {endpoint} (HTTP {response.status_code})")
+                                else:
+                                    temp_handler._append_to_log(f"Endpoint test FAILED: {endpoint} (HTTP {response.status_code})")
+                            except Exception as e:
+                                endpoint_results.append({
+                                    'endpoint': endpoint,
+                                    'error': str(e),
+                                    'success': False
+                                })
+                                temp_handler._append_to_log(f"Endpoint test ERROR: {endpoint} - {str(e)}")
+                        
+                        # Overall validation result
+                        all_endpoints_passed = all(result.get('success', False) for result in endpoint_results)
+                        
+                        if all_endpoints_passed:
+                            temp_handler._append_to_log("Update validation COMPLETED SUCCESSFULLY")
+                            temp_handler._append_to_log("All endpoints responding correctly")
+                            temp_handler._append_to_log("Update process finished")
+                            print("✓ Update validation: SUCCESS")
+                        else:
+                            temp_handler._append_to_log("Update validation COMPLETED WITH WARNINGS")
+                            temp_handler._append_to_log("Version updated but some endpoints failed")
+                            print("⚠ Update validation: SUCCESS with warnings")
                     else:
-                        temp_handler._append_to_log("Update validation COMPLETED WITH WARNINGS")
-                        temp_handler._append_to_log("Version updated but some endpoints failed")
-                        print("⚠ Update validation: SUCCESS with warnings")
-                else:
-                    temp_handler._append_to_log(f"WARNING: Version mismatch. Expected: {update_state.get('target_version')}, Got: {CHILLXAND_CONTROLLER_VERSION}")
-                    temp_handler._append_to_log("Update validation FAILED")
-                    temp_handler._append_to_log("Version did not update properly")
-                    print("✗ Update validation: FAILED")
+                        temp_handler._append_to_log(f"WARNING: Version mismatch. Expected: {update_state.get('target_version')}, Got: {CHILLXAND_CONTROLLER_VERSION}")
+                        temp_handler._append_to_log("Update validation FAILED")
+                        temp_handler._append_to_log("Version did not update properly")
+                        print("✗ Update validation: FAILED")
+                    
+                    # Clear the update state since we're done
+                    temp_handler._clear_update_state()
+                    print("Update validation completed")
                 
-                # Clear the update state since we're done
-                temp_handler._clear_update_state()
-                print("Update validation completed")
+                # Start validation in background thread
+                import threading
+                validation_thread = threading.Thread(target=run_validation, daemon=True)
+                validation_thread.start()
             
-            # Start serving requests
+            # Start serving requests (this blocks)
             httpd.serve_forever()
             
     except KeyboardInterrupt:
