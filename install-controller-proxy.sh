@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.152"
+CHILLXAND_VERSION="v1.0.153"
 
 set -e  # Exit on any error
 
@@ -39,68 +39,6 @@ check_root() {
         exit 1
     fi
 }
-
-# # Update system and install dependencies
-# install_dependencies() {
-#     log "Updating system packages..."
-#     # Try multiple approaches for apt-get update
-#     if ! apt-get update; then
-#         warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
-#         if ! apt-get update --allow-unauthenticated; then
-#             warn "Apt update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
-#             if ! apt-get update --allow-releaseinfo-change; then
-#                 warn "All apt-get update attempts failed, continuing anyway..."
-#                 warn "Some packages may not be available or up to date"
-#             fi
-#         fi
-#     fi
-
-#     log "Installing required packages..."
-#     # Install packages one by one with fallbacks
-#     for package in ufw python3 python3-pip net-tools curl; do
-#         if ! apt-get install -y "$package"; then
-#             warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
-#             if ! apt-get install -y --allow-unauthenticated "$package"; then
-#                 if [[ "$package" == "net-tools" ]]; then
-#                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
-#                 elif [[ "$package" == "ufw" ]]; then
-#                     warn "Failed to install ufw, firewall configuration will be skipped"
-#                 elif [[ "$package" == "curl" ]]; then
-#                     warn "Failed to install curl, endpoint testing will be limited"
-#                 else
-#                     error "Critical package $package could not be installed"
-#                     exit 1
-#                 fi
-#             fi
-#         else
-#             log "Successfully installed $package"
-#         fi
-#     done
-
-#     log "Installing Python requests module..."
-#     # Try to install python3-requests via apt-get first (preferred method)
-#     if apt-get install -y python3-requests; then
-#         log "Successfully installed python3-requests via apt"
-#     elif apt-get install -y --allow-unauthenticated python3-requests; then
-#         log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
-#     else
-#         warn "Failed to install python3-requests via apt, trying pip..."
-#         # Try different pip installation methods
-#         if pip3 install requests; then
-#             log "Successfully installed requests via pip3"
-#         elif pip3 install --break-system-packages requests; then
-#             log "Successfully installed requests via pip3 (with --break-system-packages)"
-#         elif python3 -m pip install requests; then
-#             log "Successfully installed requests via python3 -m pip"
-#         elif python3 -m pip install --break-system-packages requests; then
-#             log "Successfully installed requests via python3 -m pip (with --break-system-packages)"
-#         else
-#             error "Failed to install requests module through all methods"
-#             error "Please install python3-requests manually: apt-get install python3-requests"
-#             exit 1
-#         fi
-#     fi
-# }
 
 install_dependencies() {
     log "Updating system packages (excluding problematic repositories)..."
