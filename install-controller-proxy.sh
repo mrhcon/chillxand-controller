@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.149"
+CHILLXAND_VERSION="v1.0.150"
 
 set -e  # Exit on any error
 
@@ -818,7 +818,32 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     cd /tmp
     wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
     
-    DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+    # Method 1: Look for CHILLXAND_VERSION with quotes
+    echo "Trying #1"
+    DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2 2>/dev/null || echo "")
+    
+    # Method 2: If method 1 failed, try without quotes
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Trying #2"
+        DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'=' -f2 | tr -d '"' | tr -d "'" 2>/dev/null || echo "")
+    fi
+    
+    # Method 3: If still empty, try different pattern
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Trying #3"
+        DOWNLOADED_VERSION=$(grep -E 'CHILLXAND_VERSION.*=.*v[0-9]' install-controller-proxy.sh | head -1 | grep -o 'v[0-9][0-9.]*' 2>/dev/null || echo "")
+    fi
+    
+    # Method 4: Show what we actually found in the file for debugging
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Trying #4"
+        echo "Version extraction failed. Showing relevant lines from downloaded file:" >> /tmp/update.log 2>&1
+        grep -n "CHILLXAND_VERSION" install-controller-proxy.sh >> /tmp/update.log 2>&1 || echo "No CHILLXAND_VERSION lines found" >> /tmp/update.log 2>&1
+        echo "First 20 lines of downloaded file:" >> /tmp/update.log 2>&1
+        head -20 install-controller-proxy.sh >> /tmp/update.log 2>&1
+        DOWNLOADED_VERSION="unknown-extraction-failed"
+    fi
+    
     echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
     
     chmod +x install-controller-proxy.sh
