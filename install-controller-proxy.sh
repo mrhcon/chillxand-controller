@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.143"
+CHILLXAND_VERSION="v1.0.144"
 
 set -e  # Exit on any error
 
@@ -119,6 +119,7 @@ from datetime import datetime, timezone
 
 # ChillXand Controller Version
 CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
+UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
 ALLOWED_IPS = {
@@ -470,12 +471,164 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': []
             }
     
+#     def _update_controller(self):
+#         """Update the controller script from GitHub - Fire and forget method"""
+#         try:
+#             current_time = self._get_current_time()
+    
+#             # Get current installed version
+#             current_version = CHILLXAND_CONTROLLER_VERSION
+    
+#             # Get latest version from GitHub
+#             try:
+#                 import subprocess
+#                 import time
+#                 import random
+    
+#                 # Generate cache-busting values in Python      
+#                 timestamp = str(int(time.time()))          
+#                 random_num = str(random.randint(1, 10000))
+#                 cache_bust = f"{timestamp}_{random_num}"
+    
+#                 # Get latest version from GitHub using proper curl cache-busting            
+#                 result = subprocess.run([
+#                     'curl', '-s', 
+#                     '-H', 'Cache-Control: no-cache',
+#                     '-H', 'Pragma: no-cache',
+#                     f'https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}'
+#                 ], capture_output=True, text=True, timeout=30)
+                
+#                 if result.returncode == 0 and result.stdout:
+#                     # Parse the version from the downloaded content
+#                     for line in result.stdout.split('\n'):
+#                         if 'CHILLXAND_VERSION=' in line and line.strip().startswith('CHILLXAND_VERSION='):
+#                             # Extract version: CHILLXAND_VERSION="v1.0.135"
+#                             github_version = line.split('"')[1] if '"' in line else "unknown"
+#                             break
+#                     else:
+#                         github_version = "unknown"
+#                 else:
+#                     github_version = "unknown"
+                
+#             except Exception as e:
+#                 github_version = f"error: {str(e)}"                     
+            
+#             # Determine if update is needed
+#             update_needed = github_version != current_version and not github_version.startswith("error:")
+            
+#             # Determine status and message based on versions
+#             if github_version.startswith("error:"):
+#                 status = "error_github_check"
+#                 message = f"Could not check GitHub version: {github_version}"
+#                 initiate_update = False
+#                 script_created = False
+#             elif not update_needed:
+#                 status = "no_update_needed" 
+#                 message = f"Already running latest version ({current_version})"
+#                 initiate_update = False
+#                 script_created = False
+#             else:
+#                 status = "update_initiated"
+#                 message = f"Update initiated from {current_version} to {github_version}"
+#                 initiate_update = True
+#                 script_created = True
+
+#             # Only create and run script if update is needed
+#             if initiate_update:        
+#                 # Create a temporary script to handle the update
+#                 update_script = f'''#!/bin/bash
+# set -e
+# # Sleep to allow HTTP response to be sent first
+# sleep 2
+# echo "Starting controller update..." > /tmp/update.log 2>&1
+# cd /tmp
+
+# echo "Current version: {current_version}" >> /tmp/update.log 2>&1
+# echo "Target version: {github_version}" >> /tmp/update.log 2>&1
+# echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
+
+# wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
+
+# # Verify downloaded version
+# DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+# echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+
+# chmod +x install-controller-proxy.sh
+# echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
+# ./install-controller-proxy.sh >> /tmp/update.log 2>&1
+# echo "Update completed successfully" >> /tmp/update.log 2>&1
+# # Clean up
+# rm -f /tmp/update-controller.sh
+# '''
+            
+#                 # Write the update script
+#                 with open('/tmp/update-controller.sh', 'w') as f:
+#                     f.write(update_script)
+                
+#                 # Make it executable
+#                 subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+                
+#                 # Start the update process in the background (fire and forget)
+#                 # subprocess.Popen(['/tmp/update-controller.sh'], 
+#                 #                stdout=subprocess.DEVNULL, 
+#                 #                stderr=subprocess.DEVNULL,
+#                 #                start_new_session=True)
+#                 # # Instead of subprocess.Popen, use systemd-run
+#                 # subprocess.run([
+#                 #     'systemd-run', 
+#                 #     '--scope', 
+#                 #     '--no-block',  # Don't wait for scope to finish
+#                 #     '/tmp/update-controller.sh'
+#                 # ])
+#                 # Replace systemd-run with simple nohup
+#                 subprocess.Popen([
+#                     'nohup', '/tmp/update-controller.sh'
+#                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            
+#             # Return comprehensive response
+#             return {
+#                 'operation': 'controller_update',
+#                 'status': status,
+#                 'success': True,
+#                 'versions': {
+#                     'current_installed': current_version,
+#                     'github_latest': github_version,
+#                     'update_needed': update_needed
+#                 },
+#                 'update_process': {
+#                     'initiated': initiate_update,
+#                     'background_script_created': script_created,
+#                     'script_path': '/tmp/update-controller.sh' if script_created else None
+#                 },
+#                 'timestamp': current_time,
+#                 'message': message,
+#                 'notes': f'Update initiated in background. Monitor progress and completion status at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.'
+#             }                
+#         except Exception as e:
+#             return {
+#                 'operation': 'controller_update',
+#                 'status': 'exception',
+#                 'success': False,
+#                 'versions': {
+#                     'current_installed': CHILLXAND_CONTROLLER_VERSION,
+#                     'github_latest': 'unknown',
+#                     'update_needed': 'unknown'
+#                 },
+#                 'update_process': {
+#                     'initiated': False,
+#                     'background_script_created': False,
+#                     'script_path': None
+#                 },
+#                 'error': str(e),
+#                 'timestamp': self._get_current_time(),
+#                 'message': f'Update endpoint failed: {str(e)}',
+#                 'notes': 'An exception occurred in the update endpoint.'
+#             }
+
     def _update_controller(self):
-        """Update the controller script from GitHub - Fire and forget method"""
+        """Update the controller script from GitHub with callback validation"""
         try:
             current_time = self._get_current_time()
-    
-            # Get current installed version
             current_version = CHILLXAND_CONTROLLER_VERSION
     
             # Get latest version from GitHub
@@ -484,12 +637,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 import time
                 import random
     
-                # Generate cache-busting values in Python      
                 timestamp = str(int(time.time()))          
                 random_num = str(random.randint(1, 10000))
                 cache_bust = f"{timestamp}_{random_num}"
     
-                # Get latest version from GitHub using proper curl cache-busting            
                 result = subprocess.run([
                     'curl', '-s', 
                     '-H', 'Cache-Control: no-cache',
@@ -498,10 +649,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 ], capture_output=True, text=True, timeout=30)
                 
                 if result.returncode == 0 and result.stdout:
-                    # Parse the version from the downloaded content
                     for line in result.stdout.split('\n'):
                         if 'CHILLXAND_VERSION=' in line and line.strip().startswith('CHILLXAND_VERSION='):
-                            # Extract version: CHILLXAND_VERSION="v1.0.135"
                             github_version = line.split('"')[1] if '"' in line else "unknown"
                             break
                     else:
@@ -512,10 +661,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 github_version = f"error: {str(e)}"                     
             
-            # Determine if update is needed
             update_needed = github_version != current_version and not github_version.startswith("error:")
             
-            # Determine status and message based on versions
             if github_version.startswith("error:"):
                 status = "error_github_check"
                 message = f"Could not check GitHub version: {github_version}"
@@ -531,60 +678,48 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 message = f"Update initiated from {current_version} to {github_version}"
                 initiate_update = True
                 script_created = True
-
-            # Only create and run script if update is needed
-            if initiate_update:        
-                # Create a temporary script to handle the update
+    
+            if initiate_update:
+                # Save update state before starting
+                update_state = {
+                    'previous_version': current_version,
+                    'target_version': github_version,
+                    'update_started': current_time,
+                    'cache_bust': cache_bust
+                }
+                self._save_update_state(update_state)
+                
+                # Create update script
                 update_script = f'''#!/bin/bash
-set -e
-# Sleep to allow HTTP response to be sent first
-sleep 2
-echo "Starting controller update..." > /tmp/update.log 2>&1
-cd /tmp
-
-echo "Current version: {current_version}" >> /tmp/update.log 2>&1
-echo "Target version: {github_version}" >> /tmp/update.log 2>&1
-echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
-
-wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
-
-# Verify downloaded version
-DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
-echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
-
-chmod +x install-controller-proxy.sh
-echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
-./install-controller-proxy.sh >> /tmp/update.log 2>&1
-echo "Update completed successfully" >> /tmp/update.log 2>&1
-# Clean up
-rm -f /tmp/update-controller.sh
-'''
+    set -e
+    sleep 2
+    echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
+    echo "Current version: {current_version}" >> /tmp/update.log 2>&1
+    echo "Target version: {github_version}" >> /tmp/update.log 2>&1
+    echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
+    
+    cd /tmp
+    wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
+    
+    DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+    echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+    
+    chmod +x install-controller-proxy.sh
+    echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
+    ./install-controller-proxy.sh >> /tmp/update.log 2>&1
+    echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
+    rm -f /tmp/update-controller.sh
+    '''
             
-                # Write the update script
                 with open('/tmp/update-controller.sh', 'w') as f:
                     f.write(update_script)
                 
-                # Make it executable
                 subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
                 
-                # Start the update process in the background (fire and forget)
-                # subprocess.Popen(['/tmp/update-controller.sh'], 
-                #                stdout=subprocess.DEVNULL, 
-                #                stderr=subprocess.DEVNULL,
-                #                start_new_session=True)
-                # # Instead of subprocess.Popen, use systemd-run
-                # subprocess.run([
-                #     'systemd-run', 
-                #     '--scope', 
-                #     '--no-block',  # Don't wait for scope to finish
-                #     '/tmp/update-controller.sh'
-                # ])
-                # Replace systemd-run with simple nohup
                 subprocess.Popen([
                     'nohup', '/tmp/update-controller.sh'
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             
-            # Return comprehensive response
             return {
                 'operation': 'controller_update',
                 'status': status,
@@ -597,33 +732,23 @@ rm -f /tmp/update-controller.sh
                 'update_process': {
                     'initiated': initiate_update,
                     'background_script_created': script_created,
-                    'script_path': '/tmp/update-controller.sh' if script_created else None
+                    'script_path': '/tmp/update-controller.sh' if script_created else None,
+                    'callback_validation': True
                 },
                 'timestamp': current_time,
                 'message': message,
-                'notes': f'Update initiated in background. Monitor progress and completion status at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.'
-            }                
+                'notes': f'Update initiated with callback validation. Service will restart and self-validate. Monitor at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.'
+            }
+                            
         except Exception as e:
             return {
                 'operation': 'controller_update',
                 'status': 'exception',
                 'success': False,
-                'versions': {
-                    'current_installed': CHILLXAND_CONTROLLER_VERSION,
-                    'github_latest': 'unknown',
-                    'update_needed': 'unknown'
-                },
-                'update_process': {
-                    'initiated': False,
-                    'background_script_created': False,
-                    'script_path': None
-                },
                 'error': str(e),
                 'timestamp': self._get_current_time(),
-                'message': f'Update endpoint failed: {str(e)}',
-                'notes': 'An exception occurred in the update endpoint.'
-            }
-        
+                'message': f'Update endpoint failed: {str(e)}'
+            }        
     def _get_health_data(self):
         # Get basic info first
         current_time = self._get_current_time()
@@ -1062,14 +1187,227 @@ rm -f /tmp/update-controller.sh
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
         print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
+
+    """ New """
+
+    def _save_update_state(self, state_data):
+        """Save update state to survive restart"""
+        try:
+            with open(UPDATE_STATE_FILE, 'w') as f:
+                json.dump(state_data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save update state: {e}")
+    
+    def _load_update_state(self):
+        """Load update state from file"""
+        try:
+            if os.path.exists(UPDATE_STATE_FILE):
+                with open(UPDATE_STATE_FILE, 'r') as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            print(f"Failed to load update state: {e}")
+            return None
+    
+    def _clear_update_state(self):
+        """Clear update state file"""
+        try:
+            if os.path.exists(UPDATE_STATE_FILE):
+                os.remove(UPDATE_STATE_FILE)
+        except Exception as e:
+            print(f"Failed to clear update state: {e}")
+    
+    def _append_to_log(self, message):
+        """Append message to update log"""
+        try:
+            timestamp = self._get_current_time()
+            with open('/tmp/update.log', 'a') as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            print(f"Failed to write to log: {e}")
+    
+    def _complete_update_validation(self, update_state):
+        """Complete update validation after restart"""
+        try:
+            self._append_to_log("Service restarted after update, running validation...")
+            
+            # Check if version actually updated
+            version_updated = CHILLXAND_CONTROLLER_VERSION == update_state.get('target_version')
+            
+            if version_updated:
+                self._append_to_log(f"Version update confirmed: {update_state.get('previous_version')} -> {CHILLXAND_CONTROLLER_VERSION}")
+            else:
+                self._append_to_log(f"WARNING: Version mismatch. Expected: {update_state.get('target_version')}, Got: {CHILLXAND_CONTROLLER_VERSION}")
+            
+            # Test key endpoints
+            endpoint_results = []
+            test_endpoints = ['/health', '/stats', '/versions']
+            
+            for endpoint in test_endpoints:
+                try:
+                    response = requests.get(f'http://localhost:3001{endpoint}', timeout=5)
+                    success = response.status_code == 200
+                    endpoint_results.append({
+                        'endpoint': endpoint,
+                        'status_code': response.status_code,
+                        'success': success
+                    })
+                    if success:
+                        self._append_to_log(f"Endpoint test PASSED: {endpoint} (HTTP {response.status_code})")
+                    else:
+                        self._append_to_log(f"Endpoint test FAILED: {endpoint} (HTTP {response.status_code})")
+                except Exception as e:
+                    endpoint_results.append({
+                        'endpoint': endpoint,
+                        'error': str(e),
+                        'success': False
+                    })
+                    self._append_to_log(f"Endpoint test ERROR: {endpoint} - {str(e)}")
+            
+            # Overall validation result
+            all_endpoints_passed = all(result.get('success', False) for result in endpoint_results)
+            
+            if version_updated and all_endpoints_passed:
+                self._append_to_log("Update validation COMPLETED SUCCESSFULLY")
+                self._append_to_log("All endpoints responding correctly")
+                self._append_to_log("Update process finished")
+            elif version_updated:
+                self._append_to_log("Update validation COMPLETED WITH WARNINGS")
+                self._append_to_log("Version updated but some endpoints failed")
+            else:
+                self._append_to_log("Update validation FAILED")
+                self._append_to_log("Version did not update properly")
+            
+            # Clear the update state since we're done
+            self._clear_update_state()
+            
+        except Exception as e:
+            self._append_to_log(f"Update validation ERROR: {str(e)}")
+            self._clear_update_state()
+
+    """ New End """
+
+# PORT = 3001
+# if __name__ == "__main__":
+#     try:
+#         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
+#         print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
+#         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
+#             print(f"JSON proxy serving on port {PORT}")
+#             httpd.serve_forever()
+#     except KeyboardInterrupt:
+#         print("Server stopped")
+#         sys.exit(0)
+#     except Exception as e:
+#         print(f"Failed to start server: {e}")
+#         sys.exit(1)
+
 PORT = 3001
 if __name__ == "__main__":
     try:
         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
         print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
+        
+        # Check for pending update validation on startup
+        update_state = None
+        try:
+            if os.path.exists(UPDATE_STATE_FILE):
+                with open(UPDATE_STATE_FILE, 'r') as f:
+                    update_state = json.load(f)
+                print(f"Found pending update validation: {update_state.get('previous_version')} -> {update_state.get('target_version')}")
+        except Exception as e:
+            print(f"Error loading update state: {e}")
+        
+        # Start the server
         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
             print(f"JSON proxy serving on port {PORT}")
+            
+            # Complete update validation if needed (after server is ready)
+            if update_state:
+                print("Completing update validation...")
+                
+                # Create a temporary handler instance to run validation
+                class TempHandler:
+                    def _get_current_time(self):
+                        return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    def _append_to_log(self, message):
+                        try:
+                            timestamp = self._get_current_time()
+                            with open('/tmp/update.log', 'a') as f:
+                                f.write(f"[{timestamp}] {message}\n")
+                        except Exception as e:
+                            print(f"Failed to write to log: {e}")
+                    
+                    def _clear_update_state(self):
+                        try:
+                            if os.path.exists(UPDATE_STATE_FILE):
+                                os.remove(UPDATE_STATE_FILE)
+                        except Exception as e:
+                            print(f"Failed to clear update state: {e}")
+                
+                temp_handler = TempHandler()
+                temp_handler._append_to_log("Service restarted after update, running validation...")
+                
+                # Check if version actually updated
+                version_updated = CHILLXAND_CONTROLLER_VERSION == update_state.get('target_version')
+                
+                if version_updated:
+                    temp_handler._append_to_log(f"Version update confirmed: {update_state.get('previous_version')} -> {CHILLXAND_CONTROLLER_VERSION}")
+                    
+                    # Test key endpoints after a brief delay to ensure server is fully ready
+                    import time
+                    time.sleep(3)
+                    
+                    endpoint_results = []
+                    test_endpoints = ['/health', '/stats', '/versions']
+                    
+                    for endpoint in test_endpoints:
+                        try:
+                            response = requests.get(f'http://localhost:3001{endpoint}', timeout=5)
+                            success = response.status_code == 200
+                            endpoint_results.append({
+                                'endpoint': endpoint,
+                                'status_code': response.status_code,
+                                'success': success
+                            })
+                            if success:
+                                temp_handler._append_to_log(f"Endpoint test PASSED: {endpoint} (HTTP {response.status_code})")
+                            else:
+                                temp_handler._append_to_log(f"Endpoint test FAILED: {endpoint} (HTTP {response.status_code})")
+                        except Exception as e:
+                            endpoint_results.append({
+                                'endpoint': endpoint,
+                                'error': str(e),
+                                'success': False
+                            })
+                            temp_handler._append_to_log(f"Endpoint test ERROR: {endpoint} - {str(e)}")
+                    
+                    # Overall validation result
+                    all_endpoints_passed = all(result.get('success', False) for result in endpoint_results)
+                    
+                    if all_endpoints_passed:
+                        temp_handler._append_to_log("Update validation COMPLETED SUCCESSFULLY")
+                        temp_handler._append_to_log("All endpoints responding correctly")
+                        temp_handler._append_to_log("Update process finished")
+                        print("✓ Update validation: SUCCESS")
+                    else:
+                        temp_handler._append_to_log("Update validation COMPLETED WITH WARNINGS")
+                        temp_handler._append_to_log("Version updated but some endpoints failed")
+                        print("⚠ Update validation: SUCCESS with warnings")
+                else:
+                    temp_handler._append_to_log(f"WARNING: Version mismatch. Expected: {update_state.get('target_version')}, Got: {CHILLXAND_CONTROLLER_VERSION}")
+                    temp_handler._append_to_log("Update validation FAILED")
+                    temp_handler._append_to_log("Version did not update properly")
+                    print("✗ Update validation: FAILED")
+                
+                # Clear the update state since we're done
+                temp_handler._clear_update_state()
+                print("Update validation completed")
+            
+            # Start serving requests
             httpd.serve_forever()
+            
     except KeyboardInterrupt:
         print("Server stopped")
         sys.exit(0)
