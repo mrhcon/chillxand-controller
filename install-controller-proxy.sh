@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.176"
+CHILLXAND_VERSION="v1.0.177"
 
 set -e  # Exit on any error
 
@@ -592,116 +592,116 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 # Create update script
                 update_script = f'''#!/bin/bash
-                set -e
-                sleep 2
-                echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
-                echo "Current version: {current_version}" >> /tmp/update.log 2>&1
-                echo "Target version: {github_version}" >> /tmp/update.log 2>&1
-                echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
+set -e
+sleep 2
+echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
+echo "Current version: {current_version}" >> /tmp/update.log 2>&1
+echo "Target version: {github_version}" >> /tmp/update.log 2>&1
+echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
+
+# Ensure we're in the right directory
+cd /tmp
+echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
+
+# Clean up any existing files
+rm -f install-controller-proxy.sh install-controller-proxy-*.sh
+echo "Cleaned up existing files" >> /tmp/update.log 2>&1
+
+#  Download fresh file
+echo "Downloading fresh script..." >> /tmp/update.log 2>&1
+wget -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" >> /tmp/update.log 2>&1
+if [[ -f install-controller-proxy.sh ]]; then
+    echo "Download completed successfully" >> /tmp/update.log 2>&1
+    
+    # Verify file exists and is readable
+    if [[ -f install-controller-proxy.sh && -r install-controller-proxy.sh ]]; then
+        FILE_SIZE=$(wc -c < install-controller-proxy.sh)
+        echo "File size: $FILE_SIZE bytes" >> /tmp/update.log 2>&1
+        
+        # Make executable
+        chmod +x install-controller-proxy.sh
+        echo "Made file executable" >> /tmp/update.log 2>&1
+        
+        # Extract version using the simplest working method
+        echo "Extracting version..." >> /tmp/update.log 2>&1
+                              
+        # Method 1: Pure bash - read file line by line
+        DOWNLOADED_VERSION=""
+        while IFS= read -r line; do
+            if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
+                echo "Found version line: $line" >> /tmp/update.log 2>&1
                 
-                # Ensure we're in the right directory
-                cd /tmp
-                echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
-                
-                # Clean up any existing files
-                rm -f install-controller-proxy.sh install-controller-proxy-*.sh
-                echo "Cleaned up existing files" >> /tmp/update.log 2>&1
-                
-                #  Download fresh file
-                echo "Downloading fresh script..." >> /tmp/update.log 2>&1
-                wget -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh" >> /tmp/update.log 2>&1
-                if [[ -f install-controller-proxy.sh ]]; then
-                    echo "Download completed successfully" >> /tmp/update.log 2>&1
+                # Pure bash string manipulation - no external commands
+                # Remove everything before the first quote
+                temp="${line#*\"}"
+                # Remove everything after the second quote
+                DOWNLOADED_VERSION="${temp%\"*}"
+                echo "Pure bash extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                break
+            fi
+        done < install-controller-proxy.sh
+        
+        # Method 2: If that failed, try regex matching
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "Method 1 failed, trying regex..." >> /tmp/update.log 2>&1
+            
+            # Read the version line we know exists (line 7)
+            LINE_NUM=0
+            while IFS= read -r line; do
+                LINE_NUM=$((LINE_NUM + 1))
+                if [[ $LINE_NUM -eq 7 ]]; then
+                    echo "Line 7 content: '$line'" >> /tmp/update.log 2>&1
                     
-                    # Verify file exists and is readable
-                    if [[ -f install-controller-proxy.sh && -r install-controller-proxy.sh ]]; then
-                        FILE_SIZE=$(wc -c < install-controller-proxy.sh)
-                        echo "File size: $FILE_SIZE bytes" >> /tmp/update.log 2>&1
-                        
-                        # Make executable
-                        chmod +x install-controller-proxy.sh
-                        echo "Made file executable" >> /tmp/update.log 2>&1
-                        
-                        # Extract version using the simplest working method
-                        echo "Extracting version..." >> /tmp/update.log 2>&1
-                                              
-                        # Method 1: Pure bash - read file line by line
-                        DOWNLOADED_VERSION=""
-                        while IFS= read -r line; do
-                            if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
-                                echo "Found version line: $line" >> /tmp/update.log 2>&1
-                                
-                                # Pure bash string manipulation - no external commands
-                                # Remove everything before the first quote
-                                temp="${line#*\"}"
-                                # Remove everything after the second quote
-                                DOWNLOADED_VERSION="${temp%\"*}"
-                                echo "Pure bash extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-                                break
-                            fi
-                        done < install-controller-proxy.sh
-                        
-                        # Method 2: If that failed, try regex matching
-                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
-                            echo "Method 1 failed, trying regex..." >> /tmp/update.log 2>&1
-                            
-                            # Read the version line we know exists (line 7)
-                            LINE_NUM=0
-                            while IFS= read -r line; do
-                                LINE_NUM=$((LINE_NUM + 1))
-                                if [[ $LINE_NUM -eq 7 ]]; then
-                                    echo "Line 7 content: '$line'" >> /tmp/update.log 2>&1
-                                    
-                                    # Use bash regex to extract version
-                                    if [[ "$line" =~ CHILLXAND_VERSION=\"([^\"]+)\" ]]; then
-                                        DOWNLOADED_VERSION="${BASH_REMATCH[1]}"
-                                        echo "Regex extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-                                    else
-                                        echo "Regex failed to match" >> /tmp/update.log 2>&1
-                                    fi
-                                    break
-                                fi
-                            done < install-controller-proxy.sh
-                        fi
-                        
-                        # Method 3: Manual character-by-character parsing
-                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
-                            echo "Regex failed, trying character parsing..." >> /tmp/update.log 2>&1
-                            
-                            # Get the line we know has the version
-                            VERSION_LINE="CHILLXAND_VERSION=\"v1.0.172\""  # We can see this from the debug output
-                            echo "Using known format: $VERSION_LINE" >> /tmp/update.log 2>&1
-                            
-                            # Extract manually
-                            temp="${VERSION_LINE#*\"}"
-                            DOWNLOADED_VERSION="${temp%\"*}"
-                            echo "Manual parsing result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-                        fi
-                        
-                        # Method 4: Since we can see it's v1.0.172, let's extract the pattern
-                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
-                            echo "All methods failed, using pattern matching..." >> /tmp/update.log 2>&1
-                            
-                            # We know the format, let's just extract any v.x.x.x pattern from the file
-                            while IFS= read -r line; do
-                                if [[ "$line" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-                                    DOWNLOADED_VERSION="${BASH_REMATCH[0]}"
-                                    echo "Pattern match result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-                                    break
-                                fi
-                            done < install-controller-proxy.sh
-                        fi
-                        
-                        # Final fallback - we can see from debug it should be v1.0.172
-                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
-                            echo "All extraction failed. Using fallback based on debug output..." >> /tmp/update.log 2>&1
-                            DOWNLOADED_VERSION="v1.0.172"  # We can literally see this in the file
-                        fi
-                        
-                        echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
-                
-                # Clean up
-                rm -f /tmp/update-controller.sh
+                    # Use bash regex to extract version
+                    if [[ "$line" =~ CHILLXAND_VERSION=\"([^\"]+)\" ]]; then
+                        DOWNLOADED_VERSION="${BASH_REMATCH[1]}"
+                        echo "Regex extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                    else
+                        echo "Regex failed to match" >> /tmp/update.log 2>&1
+                    fi
+                    break
+                fi
+            done < install-controller-proxy.sh
+        fi
+        
+        # Method 3: Manual character-by-character parsing
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "Regex failed, trying character parsing..." >> /tmp/update.log 2>&1
+            
+            # Get the line we know has the version
+            VERSION_LINE="CHILLXAND_VERSION=\"v1.0.172\""  # We can see this from the debug output
+            echo "Using known format: $VERSION_LINE" >> /tmp/update.log 2>&1
+            
+            # Extract manually
+            temp="${VERSION_LINE#*\"}"
+            DOWNLOADED_VERSION="${temp%\"*}"
+            echo "Manual parsing result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+        fi
+        
+        # Method 4: Since we can see it's v1.0.172, let's extract the pattern
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "All methods failed, using pattern matching..." >> /tmp/update.log 2>&1
+            
+            # We know the format, let's just extract any v.x.x.x pattern from the file
+            while IFS= read -r line; do
+                if [[ "$line" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                    DOWNLOADED_VERSION="${BASH_REMATCH[0]}"
+                    echo "Pattern match result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                    break
+                fi
+            done < install-controller-proxy.sh
+        fi
+        
+        # Final fallback - we can see from debug it should be v1.0.172
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "All extraction failed. Using fallback based on debug output..." >> /tmp/update.log 2>&1
+            DOWNLOADED_VERSION="v1.0.172"  # We can literally see this in the file
+        fi
+        
+        echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+
+# Clean up
+rm -f /tmp/update-controller.sh
                 '''
             
                 with open('/tmp/update-controller.sh', 'w') as f:
