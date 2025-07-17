@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.184"
+CHILLXAND_VERSION="v1.0.185"
 
 set -e  # Exit on any error
 
@@ -633,64 +633,11 @@ if [[ -f install-controller-proxy.sh ]]; then
                 
                 # # Pure bash string manipulation - no external commands
                 # # Remove everything before the first quote
-                # temp="${line#*\\\"}"
-                # # Remove everything after the second quote
-                # DOWNLOADED_VERSION="${temp%\\\"*}"
+
                 # echo "Pure bash extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
                 break
             fi
         done < install-controller-proxy.sh
-        
-        # # Method 2: If that failed, try regex matching
-        # if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        #     echo "Method 1 failed, trying regex..." >> /tmp/update.log 2>&1
-            
-        #     # Read the version line we know exists (line 7)
-        #     LINE_NUM=0
-        #     while IFS= read -r line; do
-        #         LINE_NUM=$((LINE_NUM + 1))
-        #         if [[ $LINE_NUM -eq 7 ]]; then
-        #             echo "Line 7 content: '$line'" >> /tmp/update.log 2>&1
-                    
-        #             # Use bash regex to extract version
-        #             if [[ "$line" =~ CHILLXAND_VERSION=\"([^\"]+)\" ]]; then
-        #                 DOWNLOADED_VERSION="${BASH_REMATCH[1]}"
-        #                 echo "Regex extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-        #             else
-        #                 echo "Regex failed to match" >> /tmp/update.log 2>&1
-        #             fi
-        #             break
-        #         fi
-        #     done < install-controller-proxy.sh
-        # fi
-        
-        # # Method 3: Manual character-by-character parsing
-        # if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        #     echo "Regex failed, trying character parsing..." >> /tmp/update.log 2>&1
-            
-        #     # Get the line we know has the version
-        #     VERSION_LINE="CHILLXAND_VERSION=\"v1.0.172\""  # We can see this from the debug output
-        #     echo "Using known format: $VERSION_LINE" >> /tmp/update.log 2>&1
-            
-        #     # Extract manually
-        #     temp="${VERSION_LINE#*\"}"
-        #     DOWNLOADED_VERSION="${temp%\\\"*}"
-        #     echo "Manual parsing result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-        # fi
-        
-        # # Method 4: Since we can see it's v1.0.172, let's extract the pattern
-        # if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        #     echo "All methods failed, using pattern matching..." >> /tmp/update.log 2>&1
-            
-        #     # We know the format, let's just extract any v.x.x.x pattern from the file
-        #     while IFS= read -r line; do
-        #         if [[ "$line" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-        #             DOWNLOADED_VERSION="${BASH_REMATCH[0]}"
-        #             echo "Pattern match result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-        #             break
-        #         fi
-        #     done < install-controller-proxy.sh
-        # fi
         
         # Final fallback - we can see from debug it should be v1.0.172
         if [[ -z "$DOWNLOADED_VERSION" ]]; then
