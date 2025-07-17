@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.178"
+CHILLXAND_VERSION="v1.0.179"
 
 set -e  # Exit on any error
 
@@ -702,7 +702,7 @@ if [[ -f install-controller-proxy.sh ]]; then
 
 # Clean up
 rm -f /tmp/update-controller.sh
-                '''
+'''
             
                 with open('/tmp/update-controller.sh', 'w') as f:
                     f.write(update_script)
