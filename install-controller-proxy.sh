@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.160"
+CHILLXAND_VERSION="v1.0.161"
 
 set -e  # Exit on any error
 
@@ -602,73 +602,13 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     cd /tmp
     wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
     
-    # Replace your version extraction with this shell-agnostic approach:
+    # Debug file status
+    echo "PWD: $(pwd)" >> /tmp/update.log 2>&1
+    echo "File list: $(ls -la install-controller-proxy.sh)" >> /tmp/update.log 2>&1
+    echo "File content check: $(head -1 install-controller-proxy.sh)" >> /tmp/update.log 2>&1
     
-    echo "=== Extracting version (shell-agnostic) ===" >> /tmp/update.log 2>&1
-    
-    # Method 1: Pure bash parameter expansion (most reliable)
-    VERSION_LINE=$(sed -n '7p' install-controller-proxy.sh)
-    echo "Version line: '$VERSION_LINE'" >> /tmp/update.log 2>&1
-    
-    # Extract using bash parameter expansion
-    if [[ "$VERSION_LINE" =~ CHILLXAND_VERSION=\"(.*)\" ]]; then
-        DOWNLOADED_VERSION="${BASH_REMATCH[1]}"
-        echo "Method 1 (bash regex): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-    else
-        echo "Method 1 failed" >> /tmp/update.log 2>&1
-        DOWNLOADED_VERSION=""
-    fi
-    
-    # Method 2: Alternative bash approach
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        # Remove everything before the first quote
-        TEMP="${VERSION_LINE#*\"}"
-        # Remove everything after the second quote  
-        DOWNLOADED_VERSION="${TEMP%\"*}"
-        echo "Method 2 (bash expansion): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-    fi
-    
-    # Method 3: Using tr and sed (if bash methods fail)
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        DOWNLOADED_VERSION=$(echo "$VERSION_LINE" | tr -d ' ' | sed 's/.*CHILLXAND_VERSION="\([^"]*\)".*/\1/')
-        echo "Method 3 (tr+sed): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-    fi
-    
-    # Method 4: Manual parsing character by character (bulletproof fallback)
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        echo "Using manual parsing..." >> /tmp/update.log 2>&1
-        
-        # Find the line manually
-        while IFS= read -r line; do
-            if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
-                echo "Found line: '$line'" >> /tmp/update.log 2>&1
-                
-                # Extract everything between quotes manually
-                temp_line="$line"
-                # Remove everything up to first quote
-                temp_line="${temp_line#*\"}"
-                # Remove everything after closing quote
-                DOWNLOADED_VERSION="${temp_line%%\"*}"
-                echo "Manual extraction result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-                break
-            fi
-        done < install-controller-proxy.sh
-    fi
-    
-    # Method 5: If all else fails, hard-code the known pattern
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        echo "All methods failed, using fallback..." >> /tmp/update.log 2>&1
-        # We know from the logs it should be v1.0.158, so extract any version pattern
-        DOWNLOADED_VERSION=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' install-controller-proxy.sh | head -1)
-        echo "Fallback extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-    fi
-    
-    # Final check
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        DOWNLOADED_VERSION="unknown-all-methods-failed"
-    fi
-    
-    echo "=== Final extracted version: '$DOWNLOADED_VERSION' ===" >> /tmp/update.log 2>&1
+    # Replace your entire version extraction with just this single line:
+    DOWNLOADED_VERSION=$(grep "CHILLXAND_VERSION=" install-controller-proxy.sh | head -1 | cut -d'"' -f2)
     echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
     
     chmod +x install-controller-proxy.sh
