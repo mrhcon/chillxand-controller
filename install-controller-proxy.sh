@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.183"
+CHILLXAND_VERSION="v1.0.184"
 
 set -e  # Exit on any error
 
@@ -631,12 +631,12 @@ if [[ -f install-controller-proxy.sh ]]; then
             if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
                 echo "Found version line: $line" >> /tmp/update.log 2>&1
                 
-                # Pure bash string manipulation - no external commands
-                # Remove everything before the first quote
-                temp="${line#*\\\"}"
-                # Remove everything after the second quote
-                DOWNLOADED_VERSION="${temp%\\\"*}"
-                echo "Pure bash extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                # # Pure bash string manipulation - no external commands
+                # # Remove everything before the first quote
+                # temp="${line#*\\\"}"
+                # # Remove everything after the second quote
+                # DOWNLOADED_VERSION="${temp%\\\"*}"
+                # echo "Pure bash extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
                 break
             fi
         done < install-controller-proxy.sh
