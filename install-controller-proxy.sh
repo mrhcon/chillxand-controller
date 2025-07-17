@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.158"
+CHILLXAND_VERSION="v1.0.159"
 
 set -e  # Exit on any error
 
@@ -602,79 +602,73 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     cd /tmp
     wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
     
-    # Replace your version extraction with this debugging version:
+    # Replace your version extraction with this shell-agnostic approach:
     
-    echo "=== DEBUG: Version extraction ===" >> /tmp/update.log 2>&1
+    echo "=== Extracting version (shell-agnostic) ===" >> /tmp/update.log 2>&1
     
-    # Step 1: Check if file exists and is readable
-    if [[ -f "install-controller-proxy.sh" ]]; then
-        echo "✓ File exists" >> /tmp/update.log 2>&1
-        echo "File size: $(wc -c < install-controller-proxy.sh) bytes" >> /tmp/update.log 2>&1
+    # Method 1: Pure bash parameter expansion (most reliable)
+    VERSION_LINE=$(sed -n '7p' install-controller-proxy.sh)
+    echo "Version line: '$VERSION_LINE'" >> /tmp/update.log 2>&1
+    
+    # Extract using bash parameter expansion
+    if [[ "$VERSION_LINE" =~ CHILLXAND_VERSION=\"(.*)\" ]]; then
+        DOWNLOADED_VERSION="${BASH_REMATCH[1]}"
+        echo "Method 1 (bash regex): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
     else
-        echo "✗ File does not exist!" >> /tmp/update.log 2>&1
+        echo "Method 1 failed" >> /tmp/update.log 2>&1
+        DOWNLOADED_VERSION=""
     fi
     
-    # Step 2: Show exact content of first 10 lines
-    echo "--- First 10 lines of file ---" >> /tmp/update.log 2>&1
-    head -10 install-controller-proxy.sh >> /tmp/update.log 2>&1
-    echo "--- End of first 10 lines ---" >> /tmp/update.log 2>&1
-    
-    # Step 3: Look for the exact line
-    echo "--- Lines containing CHILLXAND_VERSION ---" >> /tmp/update.log 2>&1
-    grep -n "CHILLXAND_VERSION" install-controller-proxy.sh >> /tmp/update.log 2>&1
-    echo "--- End of CHILLXAND_VERSION lines ---" >> /tmp/update.log 2>&1
-    
-    # Step 4: Test different extraction methods with debugging
-    echo "Testing extraction methods:" >> /tmp/update.log 2>&1
-    
-    # Method A: Basic grep
-    LINE_A=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1)
-    echo "Method A - grep result: '$LINE_A'" >> /tmp/update.log 2>&1
-    
-    # Method B: head + grep
-    LINE_B=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=')
-    echo "Method B - head+grep result: '$LINE_B'" >> /tmp/update.log 2>&1
-    
-    # Method C: Extract from the line we know exists
-    VERSION_C=$(echo 'CHILLXAND_VERSION="v1.0.151"' | cut -d'"' -f2)
-    echo "Method C - test cut on known string: '$VERSION_C'" >> /tmp/update.log 2>&1
-    
-    # Method D: Extract from actual line if found
-    if [[ -n "$LINE_A" ]]; then
-        VERSION_D=$(echo "$LINE_A" | cut -d'"' -f2)
-        echo "Method D - cut from actual line: '$VERSION_D'" >> /tmp/update.log 2>&1
-    else
-        echo "Method D - no line found to cut from" >> /tmp/update.log 2>&1
+    # Method 2: Alternative bash approach
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        # Remove everything before the first quote
+        TEMP="${VERSION_LINE#*\"}"
+        # Remove everything after the second quote  
+        DOWNLOADED_VERSION="${TEMP%\"*}"
+        echo "Method 2 (bash expansion): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
     fi
     
-    # Method E: Using sed
-    VERSION_E=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    echo "Method E - sed extraction: '$VERSION_E'" >> /tmp/update.log 2>&1
-    
-    # Method F: Using awk differently
-    VERSION_F=$(awk '/CHILLXAND_VERSION=/ {gsub(/.*"/, ""); gsub(/".*/, ""); print; exit}' install-controller-proxy.sh)
-    echo "Method F - awk extraction: '$VERSION_F'" >> /tmp/update.log 2>&1
-    
-    # Method G: Simple line extraction by line number (we know it's line 7)
-    VERSION_G=$(sed -n '7p' install-controller-proxy.sh | cut -d'"' -f2)
-    echo "Method G - line 7 extraction: '$VERSION_G'" >> /tmp/update.log 2>&1
-    
-    # Method H: Check if there are hidden characters
-    echo "Method H - hex dump of line 7:" >> /tmp/update.log 2>&1
-    sed -n '7p' install-controller-proxy.sh | hexdump -C >> /tmp/update.log 2>&1
-    
-    # Use the working method
-    if [[ -n "$VERSION_G" ]]; then
-        DOWNLOADED_VERSION="$VERSION_G"
-    elif [[ -n "$VERSION_F" ]]; then
-        DOWNLOADED_VERSION="$VERSION_F"
-    elif [[ -n "$VERSION_E" ]]; then
-        DOWNLOADED_VERSION="$VERSION_E"
-    else
-        DOWNLOADED_VERSION="extraction-still-failed"
+    # Method 3: Using tr and sed (if bash methods fail)
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        DOWNLOADED_VERSION=$(echo "$VERSION_LINE" | tr -d ' ' | sed 's/.*CHILLXAND_VERSION="\([^"]*\)".*/\1/')
+        echo "Method 3 (tr+sed): '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
     fi
     
-    echo "=== Final result: '$DOWNLOADED_VERSION' ===" >> /tmp/update.log 2>&1
+    # Method 4: Manual parsing character by character (bulletproof fallback)
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "Using manual parsing..." >> /tmp/update.log 2>&1
+        
+        # Find the line manually
+        while IFS= read -r line; do
+            if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
+                echo "Found line: '$line'" >> /tmp/update.log 2>&1
+                
+                # Extract everything between quotes manually
+                temp_line="$line"
+                # Remove everything up to first quote
+                temp_line="${temp_line#*\"}"
+                # Remove everything after closing quote
+                DOWNLOADED_VERSION="${temp_line%%\"*}"
+                echo "Manual extraction result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                break
+            fi
+        done < install-controller-proxy.sh
+    fi
+    
+    # Method 5: If all else fails, hard-code the known pattern
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        echo "All methods failed, using fallback..." >> /tmp/update.log 2>&1
+        # We know from the logs it should be v1.0.158, so extract any version pattern
+        DOWNLOADED_VERSION=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' install-controller-proxy.sh | head -1)
+        echo "Fallback extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    fi
+    
+    # Final check
+    if [[ -z "$DOWNLOADED_VERSION" ]]; then
+        DOWNLOADED_VERSION="unknown-all-methods-failed"
+    fi
+    
+    echo "=== Final extracted version: '$DOWNLOADED_VERSION' ===" >> /tmp/update.log 2>&1
     echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
     
     chmod +x install-controller-proxy.sh
