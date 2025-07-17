@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.142"
+CHILLXAND_VERSION="v1.0.143"
 
 set -e  # Exit on any error
 
@@ -470,74 +470,82 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': []
             }
     
-def _update_controller(self):
-    """Update the controller script from GitHub - Fully automatic with delayed service restart"""
-    try:
-        current_time = self._get_current_time()
-        current_version = CHILLXAND_CONTROLLER_VERSION
-
-        # Get latest version from GitHub
+    def _update_controller(self):
+        """Update the controller script from GitHub - Fire and forget method"""
         try:
-            import subprocess
-            import time
-            import random
-
-            timestamp = str(int(time.time()))          
-            random_num = str(random.randint(1, 10000))
-            cache_bust = f"{timestamp}_{random_num}"
-
-            result = subprocess.run([
-                'curl', '-s', 
-                '-H', 'Cache-Control: no-cache',
-                '-H', 'Pragma: no-cache',
-                f'https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}'
-            ], capture_output=True, text=True, timeout=30)
-            
-            if result.returncode == 0 and result.stdout:
-                for line in result.stdout.split('\n'):
-                    if 'CHILLXAND_VERSION=' in line and line.strip().startswith('CHILLXAND_VERSION='):
-                        github_version = line.split('"')[1] if '"' in line else "unknown"
-                        break
+            current_time = self._get_current_time()
+    
+            # Get current installed version
+            current_version = CHILLXAND_CONTROLLER_VERSION
+    
+            # Get latest version from GitHub
+            try:
+                import subprocess
+                import time
+                import random
+    
+                # Generate cache-busting values in Python      
+                timestamp = str(int(time.time()))          
+                random_num = str(random.randint(1, 10000))
+                cache_bust = f"{timestamp}_{random_num}"
+    
+                # Get latest version from GitHub using proper curl cache-busting            
+                result = subprocess.run([
+                    'curl', '-s', 
+                    '-H', 'Cache-Control: no-cache',
+                    '-H', 'Pragma: no-cache',
+                    f'https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0 and result.stdout:
+                    # Parse the version from the downloaded content
+                    for line in result.stdout.split('\n'):
+                        if 'CHILLXAND_VERSION=' in line and line.strip().startswith('CHILLXAND_VERSION='):
+                            # Extract version: CHILLXAND_VERSION="v1.0.135"
+                            github_version = line.split('"')[1] if '"' in line else "unknown"
+                            break
+                    else:
+                        github_version = "unknown"
                 else:
                     github_version = "unknown"
-            else:
-                github_version = "unknown"
+                
+            except Exception as e:
+                github_version = f"error: {str(e)}"                     
             
-        except Exception as e:
-            github_version = f"error: {str(e)}"                     
-        
-        update_needed = github_version != current_version and not github_version.startswith("error:")
-        
-        if github_version.startswith("error:"):
-            status = "error_github_check"
-            message = f"Could not check GitHub version: {github_version}"
-            initiate_update = False
-            script_created = False
-        elif not update_needed:
-            status = "no_update_needed" 
-            message = f"Already running latest version ({current_version})"
-            initiate_update = False
-            script_created = False
-        else:
-            status = "update_initiated"
-            message = f"Update initiated from {current_version} to {github_version}"
-            initiate_update = True
-            script_created = True
+            # Determine if update is needed
+            update_needed = github_version != current_version and not github_version.startswith("error:")
+            
+            # Determine status and message based on versions
+            if github_version.startswith("error:"):
+                status = "error_github_check"
+                message = f"Could not check GitHub version: {github_version}"
+                initiate_update = False
+                script_created = False
+            elif not update_needed:
+                status = "no_update_needed" 
+                message = f"Already running latest version ({current_version})"
+                initiate_update = False
+                script_created = False
+            else:
+                status = "update_initiated"
+                message = f"Update initiated from {current_version} to {github_version}"
+                initiate_update = True
+                script_created = True
 
-        if initiate_update:        
-            # Create a smart update script that uses 'at' command for delayed execution
-            update_script = f'''#!/bin/bash
+            # Only create and run script if update is needed
+            if initiate_update:        
+                # Create a temporary script to handle the update
+                update_script = f'''#!/bin/bash
 set -e
+# Sleep to allow HTTP response to be sent first
+sleep 2
+echo "Starting controller update..." > /tmp/update.log 2>&1
+cd /tmp
 
-echo "Starting automatic controller update..." > /tmp/update.log 2>&1
 echo "Current version: {current_version}" >> /tmp/update.log 2>&1
 echo "Target version: {github_version}" >> /tmp/update.log 2>&1
 echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
 
-cd /tmp
-
-# Download the new script
-echo "Downloading new script..." >> /tmp/update.log 2>&1
 wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
 
 # Verify downloaded version
@@ -545,102 +553,76 @@ DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | hea
 echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
 
 chmod +x install-controller-proxy.sh
-
-# Create the delayed execution script
-cat > /tmp/delayed-update.sh << 'DELAYED_EOF'
-#!/bin/bash
-echo "Executing delayed update..." >> /tmp/update.log 2>&1
-cd /tmp
-
-# Stop the service
-echo "Stopping json-proxy service..." >> /tmp/update.log 2>&1
-systemctl stop json-proxy.service >> /tmp/update.log 2>&1
-
-# Wait for service to stop
-sleep 3
-
-# Run the installation script
-echo "Running installation script..." >> /tmp/update.log 2>&1
+echo "Downloaded new script, executing..." >> /tmp/update.log 2>&1
 ./install-controller-proxy.sh >> /tmp/update.log 2>&1
-
-echo "Update completed successfully at $(date)" >> /tmp/update.log 2>&1
-
+echo "Update completed successfully" >> /tmp/update.log 2>&1
 # Clean up
 rm -f /tmp/update-controller.sh
-rm -f /tmp/delayed-update.sh
-rm -f /tmp/install-controller-proxy.sh
-DELAYED_EOF
-
-chmod +x /tmp/delayed-update.sh
-
-# Schedule the update to run in 10 seconds using 'at'
-echo "Scheduling delayed update execution..." >> /tmp/update.log 2>&1
-if command -v at >/dev/null 2>&1; then
-    echo "/tmp/delayed-update.sh" | at now + 10 seconds >> /tmp/update.log 2>&1
-    echo "Update scheduled via 'at' command for 10 seconds from now" >> /tmp/update.log 2>&1
-else
-    # Fallback: use systemd-run with a delay
-    echo "Using systemd-run with delay as fallback..." >> /tmp/update.log 2>&1
-    systemd-run --on-active=10s --timer-property=AccuracySec=1s /tmp/delayed-update.sh >> /tmp/update.log 2>&1
-    echo "Update scheduled via systemd timer for 10 seconds from now" >> /tmp/update.log 2>&1
-fi
-
-echo "Update scheduling complete" >> /tmp/update.log 2>&1
 '''
-        
-            # Write the update script
-            with open('/tmp/update-controller.sh', 'w') as f:
-                f.write(update_script)
             
-            subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+                # Write the update script
+                with open('/tmp/update-controller.sh', 'w') as f:
+                    f.write(update_script)
+                
+                # Make it executable
+                subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
+                
+                # Start the update process in the background (fire and forget)
+                # subprocess.Popen(['/tmp/update-controller.sh'], 
+                #                stdout=subprocess.DEVNULL, 
+                #                stderr=subprocess.DEVNULL,
+                #                start_new_session=True)
+                # # Instead of subprocess.Popen, use systemd-run
+                # subprocess.run([
+                #     'systemd-run', 
+                #     '--scope', 
+                #     '--no-block',  # Don't wait for scope to finish
+                #     '/tmp/update-controller.sh'
+                # ])
+                # Replace systemd-run with simple nohup
+                subprocess.Popen([
+                    'nohup', '/tmp/update-controller.sh'
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             
-            # Execute the scheduling script immediately
-            subprocess.Popen([
-                '/tmp/update-controller.sh'
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        
-        return {
-            'operation': 'controller_update',
-            'status': status,
-            'success': True,
-            'versions': {
-                'current_installed': current_version,
-                'github_latest': github_version,
-                'update_needed': update_needed
-            },
-            'update_process': {
-                'initiated': initiate_update,
-                'background_script_created': script_created,
-                'script_path': '/tmp/update-controller.sh' if script_created else None,
-                'execution_method': 'delayed_automatic',
-                'delay_seconds': 10 if initiate_update else None,
-                'service_handling': 'automatic_stop_restart'
-            },
-            'timestamp': current_time,
-            'message': message,
-            'notes': f'Update scheduled for automatic execution in 10 seconds. Service will be stopped, updated, and restarted automatically. Monitor at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.',
-            'expected_completion': f'{int(timestamp) + 30}' if initiate_update else None
-        }                
-    except Exception as e:
-        return {
-            'operation': 'controller_update',
-            'status': 'exception',
-            'success': False,
-            'versions': {
-                'current_installed': CHILLXAND_CONTROLLER_VERSION,
-                'github_latest': 'unknown',
-                'update_needed': 'unknown'
-            },
-            'update_process': {
-                'initiated': False,
-                'background_script_created': False,
-                'script_path': None
-            },
-            'error': str(e),
-            'timestamp': self._get_current_time(),
-            'message': f'Update endpoint failed: {str(e)}',
-            'notes': 'An exception occurred in the update endpoint.'
-        }
+            # Return comprehensive response
+            return {
+                'operation': 'controller_update',
+                'status': status,
+                'success': True,
+                'versions': {
+                    'current_installed': current_version,
+                    'github_latest': github_version,
+                    'update_needed': update_needed
+                },
+                'update_process': {
+                    'initiated': initiate_update,
+                    'background_script_created': script_created,
+                    'script_path': '/tmp/update-controller.sh' if script_created else None
+                },
+                'timestamp': current_time,
+                'message': message,
+                'notes': f'Update initiated in background. Monitor progress and completion status at: http://{self._get_server_ip()}:3001/update/controller/log' if initiate_update else 'No update process started.'
+            }                
+        except Exception as e:
+            return {
+                'operation': 'controller_update',
+                'status': 'exception',
+                'success': False,
+                'versions': {
+                    'current_installed': CHILLXAND_CONTROLLER_VERSION,
+                    'github_latest': 'unknown',
+                    'update_needed': 'unknown'
+                },
+                'update_process': {
+                    'initiated': False,
+                    'background_script_created': False,
+                    'script_path': None
+                },
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Update endpoint failed: {str(e)}',
+                'notes': 'An exception occurred in the update endpoint.'
+            }
         
     def _get_health_data(self):
         # Get basic info first
