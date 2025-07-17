@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.146"
+CHILLXAND_VERSION="v1.0.147"
 
 set -e  # Exit on any error
 
@@ -706,9 +706,15 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     
     chmod +x install-controller-proxy.sh
     echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
+
+    # Create marker file before running installer
+    touch /tmp/update-in-progress
+
+    # Run installer - this will likely terminate our script when service restarts
     ./install-controller-proxy.sh >> /tmp/update.log 2>&1
+    
     echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
-    rm -f /tmp/update-controller.sh
+    rm -f /tmp/update-in-progress /tmp/update-controller.sh
     '''
             
                 with open('/tmp/update-controller.sh', 'w') as f:
@@ -1468,7 +1474,14 @@ setup_service() {
     # Check if service is already running and restart if so, otherwise start fresh
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is already running, restarting to pick up new script..."
+
+        # Create marker file to indicate expected termination
+        touch /tmp/update-in-progress
+        
         systemctl restart json-proxy.service
+
+        # If we get here, restart completed normally (shouldn't happen during update)
+        rm -f /tmp/update-in-progress
     else
         log "Starting json-proxy service..."
         systemctl start json-proxy.service
@@ -1727,9 +1740,21 @@ show_completion_info() {
 }
 
 # Cleanup function for script interruption
+# cleanup() {
+#     error "Script interrupted. Cleaning up..."
+#     exit 1
+# }
 cleanup() {
-    error "Script interrupted. Cleaning up..."
-    exit 1
+    # Check if this is expected termination during service restart
+    if [[ -f "/tmp/update-in-progress" ]]; then
+        info "Update process terminating as expected during service restart"
+        info "Service will restart with new version and run validation"
+        rm -f /tmp/update-in-progress
+        exit 0
+    else
+        error "Script interrupted. Cleaning up..."
+        exit 1
+    fi
 }
 
 # Main installation function
