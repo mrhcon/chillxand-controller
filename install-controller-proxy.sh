@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.148"
+CHILLXAND_VERSION="v1.0.149"
 
 set -e  # Exit on any error
 
@@ -40,15 +40,109 @@ check_root() {
     fi
 }
 
-# Update system and install dependencies
+# # Update system and install dependencies
+# install_dependencies() {
+#     log "Updating system packages..."
+#     # Try multiple approaches for apt-get update
+#     if ! apt-get update; then
+#         warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
+#         if ! apt-get update --allow-unauthenticated; then
+#             warn "Apt update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
+#             if ! apt-get update --allow-releaseinfo-change; then
+#                 warn "All apt-get update attempts failed, continuing anyway..."
+#                 warn "Some packages may not be available or up to date"
+#             fi
+#         fi
+#     fi
+
+#     log "Installing required packages..."
+#     # Install packages one by one with fallbacks
+#     for package in ufw python3 python3-pip net-tools curl; do
+#         if ! apt-get install -y "$package"; then
+#             warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
+#             if ! apt-get install -y --allow-unauthenticated "$package"; then
+#                 if [[ "$package" == "net-tools" ]]; then
+#                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
+#                 elif [[ "$package" == "ufw" ]]; then
+#                     warn "Failed to install ufw, firewall configuration will be skipped"
+#                 elif [[ "$package" == "curl" ]]; then
+#                     warn "Failed to install curl, endpoint testing will be limited"
+#                 else
+#                     error "Critical package $package could not be installed"
+#                     exit 1
+#                 fi
+#             fi
+#         else
+#             log "Successfully installed $package"
+#         fi
+#     done
+
+#     log "Installing Python requests module..."
+#     # Try to install python3-requests via apt-get first (preferred method)
+#     if apt-get install -y python3-requests; then
+#         log "Successfully installed python3-requests via apt"
+#     elif apt-get install -y --allow-unauthenticated python3-requests; then
+#         log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
+#     else
+#         warn "Failed to install python3-requests via apt, trying pip..."
+#         # Try different pip installation methods
+#         if pip3 install requests; then
+#             log "Successfully installed requests via pip3"
+#         elif pip3 install --break-system-packages requests; then
+#             log "Successfully installed requests via pip3 (with --break-system-packages)"
+#         elif python3 -m pip install requests; then
+#             log "Successfully installed requests via python3 -m pip"
+#         elif python3 -m pip install --break-system-packages requests; then
+#             log "Successfully installed requests via python3 -m pip (with --break-system-packages)"
+#         else
+#             error "Failed to install requests module through all methods"
+#             error "Please install python3-requests manually: apt-get install python3-requests"
+#             exit 1
+#         fi
+#     fi
+# }
+
 install_dependencies() {
-    log "Updating system packages..."
-    # Try multiple approaches for apt-get update
-    if ! apt-get update; then
-        warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
-        if ! apt-get update --allow-unauthenticated; then
-            warn "Apt update with --allow-unauthenticated failed, trying with --allow-releaseinfo-change..."
-            if ! apt-get update --allow-releaseinfo-change; then
+    log "Updating system packages (excluding problematic repositories)..."
+    
+    # Create a temporary sources.list that excludes xandeum repository
+    TEMP_SOURCES_DIR="/tmp/apt-sources-clean"
+    mkdir -p "$TEMP_SOURCES_DIR"
+    
+    # Copy main sources.list
+    cp /etc/apt/sources.list "$TEMP_SOURCES_DIR/"
+    
+    # Copy all sources.list.d files except xandeum ones
+    if [[ -d "/etc/apt/sources.list.d" ]]; then
+        mkdir -p "$TEMP_SOURCES_DIR/sources.list.d"
+        for file in /etc/apt/sources.list.d/*; do
+            if [[ -f "$file" ]] && ! grep -q "xandeum" "$file" 2>/dev/null; then
+                cp "$file" "$TEMP_SOURCES_DIR/sources.list.d/"
+            fi
+        done
+    fi
+    
+    # Function to run apt-get with clean sources
+    run_clean_apt() {
+        apt-get -o Dir::Etc::SourceList="$TEMP_SOURCES_DIR/sources.list" \
+                -o Dir::Etc::SourceParts="$TEMP_SOURCES_DIR/sources.list.d" \
+                "$@"
+    }
+    
+    # Try updating with clean sources (no xandeum repo)
+    if run_clean_apt update -qq; then
+        log "Package lists updated successfully (excluding xandeum repository)"
+    else
+        warn "Clean apt-get update failed, trying fallback methods..."
+        
+        # Fallback 1: Try with original sources but suppress xandeum errors
+        if apt-get update 2>&1 | grep -v "xandeum" | grep -q "Reading package lists"; then
+            log "Package lists updated with warnings filtered"
+        else
+            warn "Standard apt-get update failed, trying with --allow-unauthenticated..."
+            if apt-get update --allow-unauthenticated 2>&1 | grep -v "xandeum" | grep -q "Reading package lists"; then
+                log "Package lists updated with --allow-unauthenticated (xandeum warnings filtered)"
+            else
                 warn "All apt-get update attempts failed, continuing anyway..."
                 warn "Some packages may not be available or up to date"
             fi
@@ -56,11 +150,21 @@ install_dependencies() {
     fi
 
     log "Installing required packages..."
-    # Install packages one by one with fallbacks
+    
+    # Install packages using clean sources first, then fallback to regular
     for package in ufw python3 python3-pip net-tools curl; do
-        if ! apt-get install -y "$package"; then
-            warn "Failed to install $package via apt, trying with --allow-unauthenticated..."
-            if ! apt-get install -y --allow-unauthenticated "$package"; then
+        log "Installing $package..."
+        
+        # Try with clean sources first
+        if run_clean_apt install -y -qq "$package"; then
+            log "Successfully installed $package (clean sources)"
+        elif apt-get install -y -qq "$package"; then
+            log "Successfully installed $package (all sources)"
+        else
+            warn "Failed to install $package via apt-get, trying with --allow-unauthenticated..."
+            if apt-get install -y -qq --allow-unauthenticated "$package"; then
+                log "Successfully installed $package (with --allow-unauthenticated)"
+            else
                 if [[ "$package" == "net-tools" ]]; then
                     warn "Failed to install net-tools, will use 'ss' command instead of 'netstat'"
                 elif [[ "$package" == "ufw" ]]; then
@@ -69,22 +173,24 @@ install_dependencies() {
                     warn "Failed to install curl, endpoint testing will be limited"
                 else
                     error "Critical package $package could not be installed"
+                    cleanup_temp_sources
                     exit 1
                 fi
             fi
-        else
-            log "Successfully installed $package"
         fi
     done
 
     log "Installing Python requests module..."
-    # Try to install python3-requests via apt-get first (preferred method)
-    if apt-get install -y python3-requests; then
-        log "Successfully installed python3-requests via apt"
-    elif apt-get install -y --allow-unauthenticated python3-requests; then
+    
+    # Try installing python3-requests with clean sources first
+    if run_clean_apt install -y -qq python3-requests; then
+        log "Successfully installed python3-requests via apt-get (clean sources)"
+    elif apt-get install -y -qq python3-requests; then
+        log "Successfully installed python3-requests via apt-get"
+    elif apt-get install -y -qq --allow-unauthenticated python3-requests; then
         log "Successfully installed python3-requests via apt-get (with --allow-unauthenticated)"
     else
-        warn "Failed to install python3-requests via apt, trying pip..."
+        warn "Failed to install python3-requests via apt-get, trying pip..."
         # Try different pip installation methods
         if pip3 install requests; then
             log "Successfully installed requests via pip3"
@@ -97,8 +203,19 @@ install_dependencies() {
         else
             error "Failed to install requests module through all methods"
             error "Please install python3-requests manually: apt-get install python3-requests"
+            cleanup_temp_sources
             exit 1
         fi
+    fi
+    
+    # Clean up temporary sources
+    cleanup_temp_sources
+}
+
+# Helper function to clean up temporary sources
+cleanup_temp_sources() {
+    if [[ -d "/tmp/apt-sources-clean" ]]; then
+        rm -rf "/tmp/apt-sources-clean"
     fi
 }
 
