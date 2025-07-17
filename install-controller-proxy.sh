@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.169"
+CHILLXAND_VERSION="v1.0.171"
 
 set -e  # Exit on any error
 
@@ -592,110 +592,77 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 # Create update script
                 update_script = f'''#!/bin/bash
-    set -e
-    sleep 2
-    echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
-    echo "Current version: {current_version}" >> /tmp/update.log 2>&1
-    echo "Target version: {github_version}" >> /tmp/update.log 2>&1
-    echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
-    
-    cd /tmp
-    wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
-    
-    # Debug file status
-    echo "PWD: $(pwd)" >> /tmp/update.log 2>&1
-    echo "File list: $(ls -la install-controller-proxy.sh)" >> /tmp/update.log 2>&1
-    echo "File content check: $(head -1 install-controller-proxy.sh)" >> /tmp/update.log 2>&1
-    
-    # Replace your download section with this (force fresh download):
-    
-    echo "Preparing fresh download..." >> /tmp/update.log 2>&1
-    
-    # Force remove any existing files
-    rm -f install-controller-proxy.sh install-controller-proxy.sh.*
-    echo "Removed any existing files" >> /tmp/update.log 2>&1
-    
-    # Wait a moment to ensure file system is ready
-    sleep 1
-    
-    # Download with a unique filename first, then rename
-    TEMP_FILENAME="install-controller-proxy-$$.sh"
-    echo "Downloading to temporary file: $TEMP_FILENAME" >> /tmp/update.log 2>&1
-    
-    if wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O "$TEMP_FILENAME" "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1; then
-        echo "Download completed successfully" >> /tmp/update.log 2>&1
-        
-        # Verify the temporary file
-        if [[ -f "$TEMP_FILENAME" ]]; then
-            FILE_SIZE=$(wc -c < "$TEMP_FILENAME")
-            echo "Downloaded file size: $FILE_SIZE bytes" >> /tmp/update.log 2>&1
-            
-            # Quick verification
-            FIRST_LINE=$(head -1 "$TEMP_FILENAME")
-            VERSION_CHECK=$(grep -c "CHILLXAND_VERSION=" "$TEMP_FILENAME" 2>/dev/null || echo "0")
-            
-            echo "First line: '$FIRST_LINE'" >> /tmp/update.log 2>&1
-            echo "Version lines found: $VERSION_CHECK" >> /tmp/update.log 2>&1
-            
-            if [[ "$FIRST_LINE" == "#!/bin/bash" ]] && [[ $VERSION_CHECK -gt 0 ]] && [[ $FILE_SIZE -gt 50000 ]]; then
-                # File looks good, rename it
-                mv "$TEMP_FILENAME" install-controller-proxy.sh
-                echo "✓ File verified and ready for use" >> /tmp/update.log 2>&1
+                set -e
+                sleep 2
+                echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
+                echo "Current version: {current_version}" >> /tmp/update.log 2>&1
+                echo "Target version: {github_version}" >> /tmp/update.log 2>&1
+                echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
                 
-                # Now extract version immediately while file is fresh
-                echo "Extracting version from fresh file..." >> /tmp/update.log 2>&1
+                # Ensure we're in the right directory
+                cd /tmp
+                echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
                 
-                # Use the working command you confirmed
-                DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | cut -d'"' -f2)
-                echo "Immediate extraction result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                # Clean up any existing files
+                rm -f install-controller-proxy.sh install-controller-proxy-*.sh
+                echo "Cleaned up existing files" >> /tmp/update.log 2>&1
                 
-                # If that didn't work, debug it step by step
-                if [[ -z "$DOWNLOADED_VERSION" ]]; then
-                    echo "Extraction failed, debugging..." >> /tmp/update.log 2>&1
-                    echo "First 10 lines:" >> /tmp/update.log 2>&1
-                    head -10 install-controller-proxy.sh >> /tmp/update.log 2>&1
-                    echo "Grep result:" >> /tmp/update.log 2>&1
-                    head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' >> /tmp/update.log 2>&1
-                    echo "Cut test on known string:" >> /tmp/update.log 2>&1
-                    echo 'CHILLXAND_VERSION="v1.0.167"' | cut -d'"' -f2 >> /tmp/update.log 2>&1
+                # Download fresh file
+                echo "Downloading fresh script..." >> /tmp/update.log 2>&1
+                if wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1; then
+                    echo "Download completed successfully" >> /tmp/update.log 2>&1
                     
-                    # Try alternative extraction
-                    DOWNLOADED_VERSION=$(awk '/CHILLXAND_VERSION=/ {match($0, /"([^"]*)"/, arr); print arr[1]; exit}' install-controller-proxy.sh)
-                    echo "Alternative extraction: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                    # Verify file exists and is readable
+                    if [[ -f install-controller-proxy.sh && -r install-controller-proxy.sh ]]; then
+                        FILE_SIZE=$(wc -c < install-controller-proxy.sh)
+                        echo "File size: $FILE_SIZE bytes" >> /tmp/update.log 2>&1
+                        
+                        # Make executable
+                        chmod +x install-controller-proxy.sh
+                        echo "Made file executable" >> /tmp/update.log 2>&1
+                        
+                        # Extract version using the simplest working method
+                        echo "Extracting version..." >> /tmp/update.log 2>&1
+                        
+                        # Method 1: Use your confirmed working approach
+                        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | cut -d'"' -f2 2>/dev/null || echo "")
+                        echo "Method 1 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                        
+                        # Method 2: If empty, try with cat
+                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+                            DOWNLOADED_VERSION=$(cat install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | head -1 | cut -d'"' -f2 2>/dev/null || echo "")
+                            echo "Method 2 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                        fi
+                        
+                        # Method 3: Show what we're actually finding
+                        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+                            echo "Both methods failed. Debugging:" >> /tmp/update.log 2>&1
+                            echo "First 10 lines of file:" >> /tmp/update.log 2>&1
+                            head -10 install-controller-proxy.sh >> /tmp/update.log 2>&1
+                            echo "Lines containing CHILLXAND_VERSION:" >> /tmp/update.log 2>&1
+                            grep -n "CHILLXAND_VERSION" install-controller-proxy.sh >> /tmp/update.log 2>&1
+                            DOWNLOADED_VERSION="extraction-failed"
+                        fi
+                        
+                        echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+                        
+                        # Proceed with installation
+                        echo "Running installer (service will restart and terminate this script)..." >> /tmp/update.log 2>&1
+                        touch /tmp/update-in-progress
+                        ./install-controller-proxy.sh >> /tmp/update.log 2>&1
+                        
+                    else
+                        echo "ERROR: Downloaded file not found or not readable" >> /tmp/update.log 2>&1
+                        echo "File check: -f $(test -f install-controller-proxy.sh && echo 'exists' || echo 'missing')" >> /tmp/update.log 2>&1
+                        echo "Read check: -r $(test -r install-controller-proxy.sh && echo 'readable' || echo 'not readable')" >> /tmp/update.log 2>&1
+                    fi
+                else
+                    echo "ERROR: Download failed" >> /tmp/update.log 2>&1
                 fi
                 
-            else
-                echo "✗ File verification failed" >> /tmp/update.log 2>&1
-                echo "First line: '$FIRST_LINE'" >> /tmp/update.log 2>&1
-                echo "Version check: $VERSION_CHECK" >> /tmp/update.log 2>&1
-                echo "File size: $FILE_SIZE" >> /tmp/update.log 2>&1
-                rm -f "$TEMP_FILENAME"
-                DOWNLOADED_VERSION="verification-failed"
-            fi
-        else
-            echo "✗ Temporary file doesn't exist after download" >> /tmp/update.log 2>&1
-            DOWNLOADED_VERSION="temp-file-missing"
-        fi
-    else
-        echo "✗ Download failed" >> /tmp/update.log 2>&1
-        rm -f "$TEMP_FILENAME"
-        DOWNLOADED_VERSION="download-failed"
-    fi
-    
-    echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
-   
-    chmod +x install-controller-proxy.sh
-    echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
-
-    # Create marker file before running installer
-    touch /tmp/update-in-progress
-
-    # Run installer - this will likely terminate our script when service restarts
-    ./install-controller-proxy.sh >> /tmp/update.log 2>&1
-    
-    echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
-    rm -f /tmp/update-in-progress /tmp/update-controller.sh
-    '''
+                # Clean up
+                rm -f /tmp/update-controller.sh
+                '''
             
                 with open('/tmp/update-controller.sh', 'w') as f:
                     f.write(update_script)
