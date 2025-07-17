@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.164"
+CHILLXAND_VERSION="v1.0.166"
 
 set -e  # Exit on any error
 
@@ -607,26 +607,109 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     echo "File list: $(ls -la install-controller-proxy.sh)" >> /tmp/update.log 2>&1
     echo "File content check: $(head -1 install-controller-proxy.sh)" >> /tmp/update.log 2>&1
     
-    # Replace your version extraction with this (proper quote escaping):
+    # Replace your download and version extraction section with this:
     
-    echo "Extracting version with proper quote handling..." >> /tmp/update.log 2>&1
+    echo "Downloading and verifying script..." >> /tmp/update.log 2>&1
     
-    # Method 1: Use single quotes to avoid quote interpretation issues
-    DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | cut -d'"' -f2)
-    echo "Method 1 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    # Download with verification
+    DOWNLOAD_SUCCESS=false
+    for attempt in 1 2 3; do
+        echo "Download attempt $attempt..." >> /tmp/update.log 2>&1
+        
+        # Remove any existing file
+        rm -f install-controller-proxy.sh
+        
+        # Download the file
+        if wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1; then
+            echo "Download completed, verifying..." >> /tmp/update.log 2>&1
+            
+            # Verify file exists and has content
+            if [[ -f install-controller-proxy.sh ]]; then
+                FILE_SIZE=$(wc -c < install-controller-proxy.sh)
+                echo "Downloaded file size: $FILE_SIZE bytes" >> /tmp/update.log 2>&1
+                
+                # Check if file has reasonable size (should be > 50KB)
+                if [[ $FILE_SIZE -gt 50000 ]]; then
+                    # Check if file starts with shebang
+                    FIRST_LINE=$(head -1 install-controller-proxy.sh)
+                    echo "First line: '$FIRST_LINE'" >> /tmp/update.log 2>&1
+                    
+                    if [[ "$FIRST_LINE" == "#!/bin/bash" ]]; then
+                        # Check if version line exists
+                        VERSION_LINE_COUNT=$(grep -c "CHILLXAND_VERSION=" install-controller-proxy.sh 2>/dev/null || echo "0")
+                        echo "Version lines found: $VERSION_LINE_COUNT" >> /tmp/update.log 2>&1
+                        
+                        if [[ $VERSION_LINE_COUNT -gt 0 ]]; then
+                            echo "✓ File downloaded and verified successfully" >> /tmp/update.log 2>&1
+                            DOWNLOAD_SUCCESS=true
+                            break
+                        else
+                            echo "✗ File missing version information" >> /tmp/update.log 2>&1
+                        fi
+                    else
+                        echo "✗ File doesn't start with shebang" >> /tmp/update.log 2>&1
+                    fi
+                else
+                    echo "✗ File too small ($FILE_SIZE bytes)" >> /tmp/update.log 2>&1
+                fi
+            else
+                echo "✗ File doesn't exist after download" >> /tmp/update.log 2>&1
+            fi
+        else
+            echo "✗ Download failed" >> /tmp/update.log 2>&1
+        fi
+        
+        # Wait before retry
+        if [[ $attempt -lt 3 ]]; then
+            echo "Waiting 3 seconds before retry..." >> /tmp/update.log 2>&1
+            sleep 3
+        fi
+    done
     
-    # Method 2: If that fails, escape the quotes differently
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        echo "Method 1 failed, trying escaped quotes..." >> /tmp/update.log 2>&1
-        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep CHILLXAND_VERSION= | cut -d\" -f2)
-        echo "Method 2 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
-    fi
-    
-    # Method 3: Use a different delimiter approach
-    if [[ -z "$DOWNLOADED_VERSION" ]]; then
-        echo "Method 2 failed, trying different approach..." >> /tmp/update.log 2>&1
-        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep CHILLXAND_VERSION | sed 's/.*"\(.*\)".*/\1/')
-        echo "Method 3 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+    # Check if download was successful
+    if [[ "$DOWNLOAD_SUCCESS" == "true" ]]; then
+        echo "File verified successfully, extracting version..." >> /tmp/update.log 2>&1
+        
+        # Now extract version with multiple methods
+        # Method 1: Direct grep (your working command)
+        DOWNLOADED_VERSION=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=' | cut -d'"' -f2)
+        echo "Method 1 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+        
+        # Method 2: Show the actual line for debugging
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "Method 1 failed. Showing version line:" >> /tmp/update.log 2>&1
+            VERSION_LINE=$(head -10 install-controller-proxy.sh | grep 'CHILLXAND_VERSION=')
+            echo "Version line found: '$VERSION_LINE'" >> /tmp/update.log 2>&1
+            
+            # Try different extraction
+            if [[ -n "$VERSION_LINE" ]]; then
+                DOWNLOADED_VERSION=$(echo "$VERSION_LINE" | cut -d'"' -f2)
+                echo "Method 2 result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+            fi
+        fi
+        
+        # Method 3: Manual parsing
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            echo "Both methods failed, trying manual parsing..." >> /tmp/update.log 2>&1
+            while IFS= read -r line; do
+                if [[ "$line" == *"CHILLXAND_VERSION="* ]]; then
+                    # Extract everything between quotes
+                    temp="${line#*\"}"
+                    DOWNLOADED_VERSION="${temp%\"*}"
+                    echo "Manual parsing result: '$DOWNLOADED_VERSION'" >> /tmp/update.log 2>&1
+                    break
+                fi
+            done < install-controller-proxy.sh
+        fi
+        
+        # Final check
+        if [[ -z "$DOWNLOADED_VERSION" ]]; then
+            DOWNLOADED_VERSION="extraction-failed-despite-verification"
+        fi
+        
+    else
+        echo "Failed to download and verify file after 3 attempts" >> /tmp/update.log 2>&1
+        DOWNLOADED_VERSION="download-failed"
     fi
     
     echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
