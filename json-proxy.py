@@ -434,7 +434,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'security': {
                 'ip_whitelisting': 'enabled',
                 'allowed_ips': list(ALLOWED_IPS),
-                'client_ip': self.client_address[
+                'client_ip': self.client_address[0]
             },
             'stats': self._get_stats_data(),
             'versions': self._get_versions_data(),
