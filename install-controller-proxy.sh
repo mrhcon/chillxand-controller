@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.241"
+CHILLXAND_VERSION="v1.0.242"
 
 # Define allowed IPs with descriptive names
 declare -A ALLOWED_IPS=(
