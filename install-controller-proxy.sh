@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.196"
+CHILLXAND_VERSION="v1.0.197"
 
 set -e  # Exit on any error
 
@@ -40,6 +40,7 @@ check_root() {
     fi
 }
 
+# Update system and install dependencies
 install_dependencies() {
     log "Updating system packages (excluding problematic repositories)..."
     
@@ -525,7 +526,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'enabled': 'unknown',
                 'status_messages': []
             }
-    
+
     def _update_controller(self):
         """Update the controller script from GitHub with callback validation"""
         try:
@@ -594,28 +595,27 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 update_script = f'''#!/bin/bash
 set -e
 sleep 2
-    
+
 echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
 echo "Current version: {current_version}" >> /tmp/update.log 2>&1
 echo "Target version: {github_version}" >> /tmp/update.log 2>&1
 echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
-    
-echo "1Working directory: $(pwd)" >> /tmp/update.log 2>&1
+
 cd /tmp
-echo "2Working directory: $(pwd)" >> /tmp/update.log 2>&1
+echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
 
 # Clean up any existing files
-rm -f /tmp/install-controller-proxy.sh /tmp/install-controller-proxy-*.sh
+rm -f install-controller-proxy.sh install-controller-proxy-*.sh
 echo "Cleaned up existing files" >> /tmp/update.log 2>&1
 
-echo "Fetching new installer" >> /tmp/update.log 2>&1
-wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O /tmp/install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
-    
-DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' /tmp/install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+#  Download fresh file
+echo "Downloading fresh script..." >> /tmp/update.log 2>&1
+wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
+
+DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
 echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
-    
-# Make executable
-chmod +x /tmp/install-controller-proxy.sh
+
+chmod +x install-controller-proxy.sh
 echo "Made file executable" >> /tmp/update.log 2>&1
 
 # Create marker file before running installer
@@ -624,7 +624,7 @@ touch /tmp/update-in-progress
 # Run installer - this will likely terminate our script when service restarts
 echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
 ./install-controller-proxy.sh >> /tmp/update.log 2>&1
-    
+
 echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
 rm -f /tmp/update-in-progress /tmp/update-controller.sh
 '''
@@ -1105,6 +1105,9 @@ rm -f /tmp/update-in-progress /tmp/update-controller.sh
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
         print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
+
+    """ New """
+
     def _save_update_state(self, state_data):
         """Save update state to survive restart"""
         try:
@@ -1199,6 +1202,23 @@ rm -f /tmp/update-in-progress /tmp/update-controller.sh
         except Exception as e:
             self._append_to_log(f"Update validation ERROR: {str(e)}")
             self._clear_update_state()
+
+    """ New End """
+
+# PORT = 3001
+# if __name__ == "__main__":
+#     try:
+#         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
+#         print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
+#         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
+#             print(f"JSON proxy serving on port {PORT}")
+#             httpd.serve_forever()
+#     except KeyboardInterrupt:
+#         print("Server stopped")
+#         sys.exit(0)
+#     except Exception as e:
+#         print(f"Failed to start server: {e}")
+#         sys.exit(1)
 
 PORT = 3001
 if __name__ == "__main__":
@@ -1631,6 +1651,11 @@ show_completion_info() {
     log "Installation completed successfully!"
 }
 
+# Cleanup function for script interruption
+# cleanup() {
+#     error "Script interrupted. Cleaning up..."
+#     exit 1
+# }
 cleanup() {
     # Check if this is expected termination during service restart
     if [[ -f "/tmp/update-in-progress" ]]; then
