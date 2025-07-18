@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.194"
+CHILLXAND_VERSION="v1.0.195"
 
 set -e  # Exit on any error
 
