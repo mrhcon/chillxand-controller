@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.223"
+CHILLXAND_VERSION="v1.0.225"
 
 set -e  # Exit on any error
 
@@ -603,9 +603,13 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append(f'echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1')
                 script_lines.append('')
                 script_lines.append('cd /tmp')
+
+                dollar = '$'
+                open_paren = '('
+                close_paren = ')'
                 
                 # Build the problematic line by concatenating parts - no $() until final assembly
-                working_dir_cmd = 'echo "Working directory: ' + '$' + '(pwd)" >> /tmp/update.log 2>&1'
+                working_dir_cmd = f'echo "Working directory: {dollar}{open_paren}pwd{close_paren}" >> /tmp/update.log 2>&1'
                 script_lines.append(working_dir_cmd)
                 
                 script_lines.append('')
@@ -621,9 +625,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append('')
                 
                 # Build grep commands piece by piece to avoid execution
-                dollar = '$'
-                open_paren = '('
-                close_paren = ')'
                 version_cmd = f'DOWNLOADED_VERSION={dollar}{open_paren}grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 | cut -d\'"\' -f2{close_paren}'
                 echo_version_cmd = f'echo "Downloaded version: {dollar}DOWNLOADED_VERSION" >> /tmp/update.log 2>&1'
                 
