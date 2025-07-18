@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.201"
+CHILLXAND_VERSION="v1.0.202"
 
 set -e  # Exit on any error
 
@@ -1110,9 +1110,6 @@ rm -f /tmp/update-in-progress /tmp/update-controller.sh
         allowed = "ALLOWED" if client_ip in ALLOWED_IPS else "BLOCKED"
         print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {allowed} - {client_ip} - {format % args}")
 
-
-    """ New """
-
     def _save_update_state(self, state_data):
         """Save update state to survive restart"""
         try:
@@ -1207,23 +1204,6 @@ rm -f /tmp/update-in-progress /tmp/update-controller.sh
         except Exception as e:
             self._append_to_log(f"Update validation ERROR: {str(e)}")
             self._clear_update_state()
-
-    """ New End """
-
-# PORT = 3001
-# if __name__ == "__main__":
-#     try:
-#         print(f"ChillXand Controller {CHILLXAND_CONTROLLER_VERSION} starting on port {PORT}")
-#         print(f"IP Whitelisting ENABLED - Allowed IPs: {', '.join(ALLOWED_IPS)}")
-#         with socketserver.TCPServer(("", PORT), ReadOnlyHandler) as httpd:
-#             print(f"JSON proxy serving on port {PORT}")
-#             httpd.serve_forever()
-#     except KeyboardInterrupt:
-#         print("Server stopped")
-#         sys.exit(0)
-#     except Exception as e:
-#         print(f"Failed to start server: {e}")
-#         sys.exit(1)
 
 PORT = 3001
 if __name__ == "__main__":
