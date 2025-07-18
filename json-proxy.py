@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 
 # ChillXand Controller Version
 CHILLXAND_CONTROLLER_VERSION = "{{CHILLXAND_VERSION}}"
+
+# Atlas API Configuration
+ATLAS_API_URL = "{{ATLAS_API_URL}}"
+
 UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
@@ -90,7 +94,75 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'status_messages': [],
                 'timestamp': self._get_current_time()
             }
-
+            
+     def _check_atlas_registration(self):
+        """Check if this server's IP is registered in Atlas"""
+        try:
+            # Get our external IP address
+            try:
+                # Try to get external IP from a reliable source
+                response = requests.get('https://api.ipify.org', timeout=10)
+                if response.status_code == 200:
+                    external_ip = response.text.strip()
+                else:
+                    # Fallback to getting local IP
+                    external_ip = self._get_server_ip()
+            except Exception:
+                external_ip = self._get_server_ip()
+            
+            # Query Atlas API
+            response = requests.get(ATLAS_API_URL, timeout=10)
+            
+            if response.status_code == 200:
+                pods_data = response.json()
+                
+                # Check if our IP is in the pods list
+                # Assuming the API returns a list of pods with IP addresses
+                # You may need to adjust this based on the actual API response format
+                found_ip = False
+                if isinstance(pods_data, list):
+                    for pod in pods_data:
+                        # Check various possible IP field names
+                        pod_ip = pod.get('ip') or pod.get('address') or pod.get('host') or pod.get('server_ip')
+                        if pod_ip == external_ip:
+                            found_ip = True
+                            break
+                elif isinstance(pods_data, dict) and 'pods' in pods_data:
+                    for pod in pods_data['pods']:
+                        pod_ip = pod.get('ip') or pod.get('address') or pod.get('host') or pod.get('server_ip')
+                        if pod_ip == external_ip:
+                            found_ip = True
+                            break
+                
+                return {
+                    'status': 'pass' if found_ip else 'fail',
+                    'external_ip': external_ip,
+                    'atlas_url': ATLAS_API_URL,
+                    'registered': found_ip,
+                    'response_code': response.status_code,
+                    'pods_count': len(pods_data) if isinstance(pods_data, list) else len(pods_data.get('pods', [])) if isinstance(pods_data, dict) else 0,
+                    'time': self._get_current_time()
+                }
+            else:
+                return {
+                    'status': 'fail',
+                    'external_ip': external_ip,
+                    'atlas_url': ATLAS_API_URL,
+                    'registered': False,
+                    'response_code': response.status_code,
+                    'error': f'Atlas API returned HTTP {response.status_code}',
+                    'time': self._get_current_time()
+                }
+                
+        except Exception as e:
+            return {
+                'status': 'fail',
+                'atlas_url': ATLAS_API_URL,
+                'registered': False,
+                'error': str(e),
+                'time': self._get_current_time()
+            }
+    
     def _get_update_log(self):
         """Get the contents of the update log file"""
         try:
@@ -697,6 +769,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             health_data['checks']['system:network'] = {
                 'status': 'fail',
                 'output': str(e)
+            }
+            overall_status = 'fail'
+        
+        # Check Atlas registration
+        try:
+            atlas_check = self._check_atlas_registration()
+            health_data['checks']['atlas:registration'] = atlas_check
+            
+            if atlas_check['status'] == 'fail':
+                overall_status = 'fail'
+                
+        except Exception as e:
+            health_data['checks']['atlas:registration'] = {
+                'status': 'fail',
+                'error': str(e),
+                'time': current_time
             }
             overall_status = 'fail'
         
