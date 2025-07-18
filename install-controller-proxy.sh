@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.246"
+CHILLXAND_VERSION="v1.0.247"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
