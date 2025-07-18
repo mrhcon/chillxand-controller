@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.190"
+CHILLXAND_VERSION="v1.0.191"
 
 set -e  # Exit on any error
 
@@ -654,26 +654,35 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 update_script = f'''#!/bin/bash
     set -e
     sleep 2
+    
     echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
     echo "Current version: {current_version}" >> /tmp/update.log 2>&1
     echo "Target version: {github_version}" >> /tmp/update.log 2>&1
     echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
     
+    echo "1Working directory: $(pwd)" >> /tmp/update.log 2>&1
     cd /tmp
-    echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
-    
-    wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
+    echo "2Working directory: $(pwd)" >> /tmp/update.log 2>&1
+
+    # Clean up any existing files
+    rm -f /tmp/install-controller-proxy.sh /tmp/install-controller-proxy-*.sh
+    echo "Cleaned up existing files" >> /tmp/update.log 2>&1
+
+    echo "Fetching new installer" >> /tmp/update.log 2>&1
+    wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O /tmp/install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1
     
     DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' /tmp/install-controller-proxy.sh | head -1 | cut -d'"' -f2)
     echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
     
+    # Make executable
     chmod +x /tmp/install-controller-proxy.sh
-    echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
+    echo "Made file executable" >> /tmp/update.log 2>&1
 
     # Create marker file before running installer
     touch /tmp/update-in-progress
 
     # Run installer - this will likely terminate our script when service restarts
+    echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
     ./tmp/install-controller-proxy.sh >> /tmp/update.log 2>&1
     
     echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
