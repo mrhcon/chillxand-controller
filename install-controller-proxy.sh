@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.249"
+CHILLXAND_VERSION="v1.0.250"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -104,7 +104,7 @@ install_dependencies() {
     log "Installing required packages..."
     
     # Install packages using clean sources first, then fallback to regular
-    for package in ufw python3 python3-pip net-tools curl; do
+    for package in ufw python3 python3-pip net-tools curl netcat-openbsd; do
         log "Installing $package..."
         
         # Try with clean sources first
@@ -123,6 +123,8 @@ install_dependencies() {
                     warn "Failed to install ufw, firewall configuration will be skipped"
                 elif [[ "$package" == "curl" ]]; then
                     warn "Failed to install curl, endpoint testing will be limited"
+                elif [[ "$package" == "netcat-openbsd" ]]; then
+                    warn "Failed to install netcat-openbsd, UDP connectivity testing will be limited"                      
                 else
                     error "Critical package $package could not be installed"
                     cleanup_temp_sources
