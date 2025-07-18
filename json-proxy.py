@@ -95,58 +95,46 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'timestamp': self._get_current_time()
             }
             
-     def _check_atlas_registration(self):
+    def _check_atlas_registration(self):
         """Check if this server's IP is registered in Atlas"""
         try:
-            # Get our external IP address
-            try:
-                # Try to get external IP from a reliable source
-                response = requests.get('https://api.ipify.org', timeout=10)
-                if response.status_code == 200:
-                    external_ip = response.text.strip()
-                else:
-                    # Fallback to getting local IP
-                    external_ip = self._get_server_ip()
-            except Exception:
-                external_ip = self._get_server_ip()
+            # Get our server IP using existing function
+            server_ip = self._get_server_ip()
             
             # Query Atlas API
             response = requests.get(ATLAS_API_URL, timeout=10)
             
             if response.status_code == 200:
-                pods_data = response.json()
+                atlas_data = response.json()
                 
                 # Check if our IP is in the pods list
-                # Assuming the API returns a list of pods with IP addresses
-                # You may need to adjust this based on the actual API response format
+                # Atlas returns: {"pods": ["ip:port", ...], "pods_count": 109}
+                found_pod = None
                 found_ip = False
-                if isinstance(pods_data, list):
-                    for pod in pods_data:
-                        # Check various possible IP field names
-                        pod_ip = pod.get('ip') or pod.get('address') or pod.get('host') or pod.get('server_ip')
-                        if pod_ip == external_ip:
-                            found_ip = True
-                            break
-                elif isinstance(pods_data, dict) and 'pods' in pods_data:
-                    for pod in pods_data['pods']:
-                        pod_ip = pod.get('ip') or pod.get('address') or pod.get('host') or pod.get('server_ip')
-                        if pod_ip == external_ip:
+                
+                if 'pods' in atlas_data and isinstance(atlas_data['pods'], list):
+                    for pod_entry in atlas_data['pods']:
+                        # Each entry is in format "ip:port"
+                        pod_ip = pod_entry.split(':')[0] if ':' in pod_entry else pod_entry
+                        if pod_ip == server_ip:
+                            found_pod = pod_entry
                             found_ip = True
                             break
                 
                 return {
                     'status': 'pass' if found_ip else 'fail',
-                    'external_ip': external_ip,
+                    'server_ip': server_ip,
                     'atlas_url': ATLAS_API_URL,
                     'registered': found_ip,
+                    'pod_entry': found_pod,
                     'response_code': response.status_code,
-                    'pods_count': len(pods_data) if isinstance(pods_data, list) else len(pods_data.get('pods', [])) if isinstance(pods_data, dict) else 0,
+                    'total_pods': atlas_data.get('pods_count', len(atlas_data.get('pods', []))),
                     'time': self._get_current_time()
                 }
             else:
                 return {
                     'status': 'fail',
-                    'external_ip': external_ip,
+                    'server_ip': server_ip,
                     'atlas_url': ATLAS_API_URL,
                     'registered': False,
                     'response_code': response.status_code,
