@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.232"
+CHILLXAND_VERSION="v1.0.235"
 
 set -e  # Exit on any error
 
@@ -160,9 +160,15 @@ cleanup_temp_sources() {
 
 create_python_script() {
     log "Downloading and configuring JSON proxy Python script..."
+
+    # Generate cache-busting parameters
+    timestamp=$(date +%s)
+    random_num=$((RANDOM % 10000))
+    cache_bust="${timestamp}_${random_num}"
     
     # Download the Python script template from GitHub
-    if wget --no-cache --no-cookies -O /tmp/json-proxy-template.py "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/json-proxy.py"; then
+    if wget --no-cache --no-cookies --user-agent="ChillXandController/${timestamp}" -O /tmp/json-proxy-template.py "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/json-proxy.py?cb=${cache_bust}"; then
+
         log "Successfully downloaded Python script template"
     else
         error "Failed to download Python script template from GitHub"
