@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.230"
+CHILLXAND_VERSION="v1.0.231"
 
 set -e  # Exit on any error
 
@@ -158,33 +158,27 @@ cleanup_temp_sources() {
     fi
 }
 
-# # Create the Python script
-# create_python_script() {
-#     log "Creating JSON proxy Python script with IP whitelisting..."
-    
-#     cat > /opt/json-proxy.py << EOF
-
-# EOF
-
-#     chmod +x /opt/json-proxy.py
-#     log "Python script created with IP whitelisting and made executable"
-# }
-
-# In create_python_script() function:
 create_python_script() {
-    log "Downloading JSON proxy Python script..."
+    log "Downloading and configuring JSON proxy Python script..."
     
-    # Download the Python script from GitHub
-    if wget --no-cache --no-cookies -O /opt/json-proxy.py "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/json-proxy.py"; then
-        log "Successfully downloaded Python script"
+    # Download the Python script template from GitHub
+    if wget --no-cache --no-cookies -O /tmp/json-proxy-template.py \
+        "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/json-proxy.py"; then
+        log "Successfully downloaded Python script template"
     else
-        error "Failed to download json-proxy.py script from GitHub"
+        error "Failed to download Python script template from GitHub"
         exit 1
     fi
     
+    # Replace the version placeholder with actual version
+    sed "s/{{CHILLXAND_VERSION}}/$CHILLXAND_VERSION/g" /tmp/json-proxy-template.py > /opt/json-proxy.py
+    
+    # Clean up temp file
+    rm -f /tmp/json-proxy-template.py
+    
     # Make it executable
     chmod +x /opt/json-proxy.py
-    log "Python script created with IP whitelisting and made executable"
+    log "Python script configured with version $CHILLXAND_VERSION and made executable"
 }
 
 # Create systemd service
