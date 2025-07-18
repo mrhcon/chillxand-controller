@@ -14,13 +14,7 @@ UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
 ALLOWED_IPS = {
-    '74.208.234.116',   # Master (USA)
-    '85.215.145.173',   # Control2 (Germany)
-    '194.164.163.124',  # Control3 (Spain)
-    '174.114.192.84',   # Home
-    '67.70.165.78',     # Home #2
-    '127.0.0.1',        # Localhost
-    '::1'               # IPv6 localhost
+{{ALLOWED_IPS}}
 }
 
 class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
