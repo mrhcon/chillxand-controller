@@ -254,6 +254,92 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'notes': 'An error occurred while trying to access the log file.'
             }
 
+    def _get_pod_update_log(self):
+        """Get the contents of the pod update log file"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Check if log file exists
+            log_file = '/tmp/pod-update.log'
+            if not os.path.exists(log_file):
+                return {
+                    'operation': 'get_pod_update_log',
+                    'status': 'no_log',
+                    'success': True,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': 0,
+                    'last_modified': None,
+                    'timestamp': current_time,
+                    'message': 'No pod update log file found',
+                    'notes': 'Pod update log will be created when an update is initiated.'
+                }
+            
+            # Get file stats
+            stat = os.stat(log_file)
+            file_size = stat.st_size
+            last_modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            # Read the log file
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+                
+                # Split into lines for easier parsing
+                log_lines = log_content.strip().split('\n') if log_content.strip() else []
+                
+                # Determine status based on log content
+                if 'Pod update completed successfully' in log_content:
+                    status = 'completed_success'
+                elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    status = 'completed_error'
+                elif log_content.strip():
+                    status = 'in_progress'
+                else:
+                    status = 'empty'
+                
+                return {
+                    'operation': 'get_pod_update_log',
+                    'status': status,
+                    'success': True,
+                    'log_content': log_content,
+                    'log_lines': log_lines,
+                    'line_count': len(log_lines),
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'timestamp': current_time,
+                    'message': f'Pod update log retrieved successfully ({len(log_lines)} lines)',
+                    'notes': f'Log file last modified: {last_modified}'
+                }
+                
+            except Exception as read_error:
+                return {
+                    'operation': 'get_pod_update_log',
+                    'status': 'read_error',
+                    'success': False,
+                    'log_content': '',
+                    'log_lines': [],
+                    'file_size': file_size,
+                    'last_modified': last_modified,
+                    'error': str(read_error),
+                    'timestamp': current_time,
+                    'message': f'Failed to read pod update log: {str(read_error)}',
+                    'notes': 'Log file exists but could not be read.'
+                }
+                
+        except Exception as e:
+            return {
+                'operation': 'get_pod_update_log',
+                'status': 'error',
+                'success': False,
+                'log_content': '',
+                'log_lines': [],
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Failed to access pod update log: {str(e)}',
+                'notes': 'An error occurred while trying to access the log file.'
+            }
+    
     def _check_connectivity(self):
         """Check UDP 5000 public access and localhost TCP ports"""
         try:
@@ -533,7 +619,96 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'enabled': 'unknown',
                 'status_messages': []
             }
-
+    
+    def _update_pod(self):
+        """Update the pod using the Xandeum installer with option 2"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Build script completely avoiding $(...) patterns during construction
+            script_lines = []
+            script_lines.append('#!/bin/bash')
+            script_lines.append('set -e')
+            script_lines.append('sleep 2')
+            script_lines.append('')
+            script_lines.append('echo "Starting pod update using Xandeum installer..." > /tmp/pod-update.log 2>&1')
+            script_lines.append(f'echo "Timestamp: {current_time}" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('cd /tmp')
+            
+            dollar = '$'
+            open_paren = '('
+            close_paren = ')'
+            
+            # Build the working directory command
+            working_dir_cmd = f'echo "Working directory: {dollar}{open_paren}pwd{close_paren}" >> /tmp/pod-update.log 2>&1'
+            script_lines.append(working_dir_cmd)
+            
+            script_lines.append('')
+            script_lines.append('# Clean up any existing installer files')
+            script_lines.append('rm -f install.sh install-*.sh')
+            script_lines.append('echo "Cleaned up existing installer files" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('# Download fresh installer')
+            script_lines.append('echo "Downloading Xandeum installer..." >> /tmp/pod-update.log 2>&1')
+            script_lines.append('wget -O install.sh "https://raw.githubusercontent.com/Xandeum/xandminer-installer/refs/heads/master/install.sh" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('sleep 2')
+            script_lines.append('')
+            script_lines.append('chmod a+x install.sh')
+            script_lines.append('echo "Made installer executable" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('# Run installer with option 2 (Update Xandeum pNode Software)')
+            script_lines.append('echo "Running Xandeum installer with option 2 (Update)..." >> /tmp/pod-update.log 2>&1')
+            script_lines.append('echo "2" | ./install.sh >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('# Clean up installer')
+            script_lines.append('rm -f install.sh')
+            script_lines.append('echo "Cleaned up installer file" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('')
+            script_lines.append('echo "Pod update completed successfully" >> /tmp/pod-update.log 2>&1')
+            script_lines.append('rm -f /tmp/update-pod.sh')
+            
+            # Join all lines - no command substitution patterns exist during processing
+            final_script = '\n'.join(script_lines)
+            
+            # Write the final script
+            with open('/tmp/update-pod.sh', 'w') as f:
+                f.write(final_script)
+            
+            subprocess.run(['chmod', '+x', '/tmp/update-pod.sh'], timeout=5)
+            
+            subprocess.Popen([
+                'nohup', '/tmp/update-pod.sh'
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            
+            return {
+                'operation': 'pod_update',
+                'status': 'update_initiated',
+                'success': True,
+                'update_process': {
+                    'initiated': True,
+                    'background_script_created': True,
+                    'script_path': '/tmp/update-pod.sh',
+                    'log_path': '/tmp/pod-update.log',
+                    'installer_url': 'https://raw.githubusercontent.com/Xandeum/xandminer-installer/refs/heads/master/install.sh',
+                    'selected_option': '2 (Update Xandeum pNode Software)'
+                },
+                'timestamp': current_time,
+                'message': 'Pod update initiated using Xandeum installer (option 2)',
+                'notes': f'Pod update initiated. Monitor at: http://{self._get_server_ip()}:3001/update/pod/log'
+            }
+            
+        except Exception as e:
+            return {
+                'operation': 'pod_update',
+                'status': 'exception',
+                'success': False,
+                'error': str(e),
+                'timestamp': self._get_current_time(),
+                'message': f'Pod update endpoint failed: {str(e)}'
+            }
+    
     def _update_controller(self):
         """Update the controller script from GitHub with callback validation"""
         try:
@@ -724,7 +899,9 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'restart_xandminer': f'http://{server_ip}:3001/restart/xandminer',
                 'restart_xandminerd': f'http://{server_ip}:3001/restart/xandminerd',
                 'update_controller': f'http://{server_ip}:3001/update/controller',
-                'update_controller_log': f'http://{server_ip}:3001/update/controller/log'
+                'update_pod': f'http://{server_ip}:3001/update/pod',
+                'update_controller_log': f'http://{server_ip}:3001/update/controller/log',
+                'update_pod_log': f'http://{server_ip}:3001/update/pod/log'
             }
         }
         
@@ -1153,7 +1330,72 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     self.end_headers()
                     json_response = json.dumps(error_response, indent=2)
                     self.wfile.write(json_response.encode('utf-8'))               
-                
+            elif self.path == '/update/pod':
+                try:
+                    update_data = self._update_pod()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(update_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'pod_update',
+                        'status': 'exception',
+                        'return_code': -1,
+                        'success': False,
+                        'output': f'Endpoint exception: {str(e)}',
+                        'stdout': '',
+                        'stderr': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Pod update endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the pod update endpoint itself.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))    
+
+            elif self.path == '/update/pod/log':
+                try:
+                    log_data = self._get_pod_update_log()
+                    
+                    # Always return 200 status code
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    
+                    json_response = json.dumps(log_data, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))
+                    
+                except Exception as e:
+                    # Even for exceptions, return 200 with error details
+                    error_response = {
+                        'operation': 'get_pod_update_log',
+                        'status': 'exception',
+                        'success': False,
+                        'log_content': '',
+                        'log_lines': [],
+                        'error': str(e),
+                        'timestamp': self._get_current_time(),
+                        'message': f'Pod update log endpoint failed: {str(e)}',
+                        'notes': 'An exception occurred in the pod update log endpoint.'
+                    }
+                    self.send_response(200)  # Still return 200
+                    self.send_header('Content-type', 'application/json')
+                    self._set_cors_headers()
+                    self.end_headers()
+                    json_response = json.dumps(error_response, indent=2)
+                    self.wfile.write(json_response.encode('utf-8'))            
             else:
                 self.send_error(404, "Not Found")
                 
