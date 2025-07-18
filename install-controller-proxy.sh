@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.240"
+CHILLXAND_VERSION="v1.0.241"
 
 # Define allowed IPs with descriptive names
 declare -A ALLOWED_IPS=(
@@ -626,7 +626,7 @@ main() {
     create_python_script
     create_systemd_service
     setup_service
-    setup_
+    setup_firewall
     test_installation
     show_completion_info
 }
