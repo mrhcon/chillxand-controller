@@ -238,6 +238,108 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'message': f'Failed to access update log: {str(e)}',
                 'notes': 'An error occurred while trying to access the log file.'
             }
+
+    def _check_connectivity(self):
+        """Check UDP 5000 public access and localhost TCP ports"""
+        try:
+            current_time = self._get_current_time()
+            server_ip = self._get_server_ip()
+            
+            results = {
+                'status': 'pass',
+                'time': current_time,
+                'server_ip': server_ip,
+                'checks': {}
+            }
+            
+            # Check UDP 5000 public accessibility
+            try:
+                # Check if netcat is available
+                nc_check = subprocess.run(['which', 'nc'], capture_output=True, timeout=5)
+                if nc_check.returncode == 0:
+                    # Test UDP 5000 connectivity
+                    udp_test = subprocess.run([
+                        'timeout', '10', 'nc', '-zu', server_ip, '5000'
+                    ], capture_output=True, timeout=15)
+                    
+                    if udp_test.returncode == 0:
+                        results['checks']['udp_5000_public'] = {
+                            'status': 'pass',
+                            'message': 'UDP 5000 PUBLIC',
+                            'accessible': True
+                        }
+                    else:
+                        results['checks']['udp_5000_public'] = {
+                            'status': 'fail',
+                            'message': 'UDP 5000 NOT PUBLIC',
+                            'accessible': False
+                        }
+                        results['status'] = 'fail'
+                else:
+                    results['checks']['udp_5000_public'] = {
+                        'status': 'warn',
+                        'message': 'netcat (nc) not installed - cannot test UDP 5000',
+                        'accessible': 'unknown'
+                    }
+                    if results['status'] == 'pass':
+                        results['status'] = 'warn'
+            except Exception as e:
+                results['checks']['udp_5000_public'] = {
+                    'status': 'fail',
+                    'message': f'UDP test failed: {str(e)}',
+                    'accessible': False
+                }
+                results['status'] = 'fail'
+            
+            # Check localhost TCP ports 3000 and 4000
+            localhost_ports = [3000, 4000]
+            for port in localhost_ports:
+                try:
+                    # Use ss command to check if port is listening on localhost
+                    ss_check = subprocess.run([
+                        'ss', '-tlnp'
+                    ], capture_output=True, text=True, timeout=5)
+                    
+                    if ss_check.returncode == 0:
+                        port_pattern = f'127.0.0.1:{port} '
+                        if port_pattern in ss_check.stdout:
+                            results['checks'][f'localhost_tcp_{port}'] = {
+                                'status': 'pass',
+                                'message': f'Port {port} listening',
+                                'listening': True
+                            }
+                        else:
+                            results['checks'][f'localhost_tcp_{port}'] = {
+                                'status': 'fail',
+                                'message': f'Port {port} not listening',
+                                'listening': False
+                            }
+                            results['status'] = 'fail'
+                    else:
+                        results['checks'][f'localhost_tcp_{port}'] = {
+                            'status': 'warn',
+                            'message': f'Cannot check port {port} - ss command failed',
+                            'listening': 'unknown'
+                        }
+                        if results['status'] == 'pass':
+                            results['status'] = 'warn'
+                            
+                except Exception as e:
+                    results['checks'][f'localhost_tcp_{port}'] = {
+                        'status': 'fail',
+                        'message': f'Port {port} check failed: {str(e)}',
+                        'listening': False
+                    }
+                    results['status'] = 'fail'
+            
+            return results
+            
+        except Exception as e:
+            return {
+                'status': 'fail',
+                'error': str(e),
+                'time': self._get_current_time()
+            }
     
     def _get_network_stats(self):
         try:
@@ -332,7 +434,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             'security': {
                 'ip_whitelisting': 'enabled',
                 'allowed_ips': list(ALLOWED_IPS),
-                'client_ip': self.client_address[0]
+                'client_ip': self.client_address[
             },
             'stats': self._get_stats_data(),
             'versions': self._get_versions_data(),
@@ -575,7 +677,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'error': str(e),
                 'timestamp': self._get_current_time(),
                 'message': f'Update endpoint failed: {str(e)}'
-            }        
+            }  
+            
     def _get_health_data(self):
         # Get basic info first
         current_time = self._get_current_time()
@@ -759,6 +862,24 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'output': str(e)
             }
             overall_status = 'fail'
+
+        # Check connectivity (UDP 5000 public + localhost TCP ports)
+        try:
+            connectivity_check = self._check_connectivity()
+            health_data['checks']['connectivity'] = connectivity_check
+            
+            if connectivity_check['status'] == 'fail':
+                overall_status = 'fail'
+            elif connectivity_check['status'] == 'warn' and overall_status == 'pass':
+                overall_status = 'warn'
+                
+        except Exception as e:
+            health_data['checks']['connectivity'] = {
+                'status': 'fail',
+                'error': str(e),
+                'time': current_time
+            }
+            overall_status = 'fail'        
         
         # Check Atlas registration
         try:
