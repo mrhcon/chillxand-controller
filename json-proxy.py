@@ -442,7 +442,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'pod': self._get_service_status('pod.service'),
                 'xandminer': self._get_service_status('xandminer.service'),
                 'xandminerd': self._get_service_status('xandminerd.service')
-            }
+            },
+            'health': self._get_health_data()            
         }
         return summary
         
