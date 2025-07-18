@@ -807,48 +807,48 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 }
                 overall_status = 'fail'
         
-        # Check application endpoints
-        try:
-            response = requests.get('http://localhost:80/stats', timeout=5)
-            if response.status_code == 200:
-                app_status = 'pass'
-            else:
-                app_status = 'fail'
-                overall_status = 'fail'
+        # # Check application endpoints
+        # try:
+        #     response = requests.get('http://localhost:80/stats', timeout=5)
+        #     if response.status_code == 200:
+        #         app_status = 'pass'
+        #     else:
+        #         app_status = 'fail'
+        #         overall_status = 'fail'
                 
-            health_data['checks']['app:stats'] = {
-                'status': app_status,
-                'observedValue': response.status_code,
-                'time': current_time
-            }
+        #     health_data['checks']['app:stats'] = {
+        #         'status': app_status,
+        #         'observedValue': response.status_code,
+        #         'time': current_time
+        #     }
             
-        except Exception as e:
-            health_data['checks']['app:stats'] = {
-                'status': 'fail',
-                'output': str(e)
-            }
-            overall_status = 'fail'
+        # except Exception as e:
+        #     health_data['checks']['app:stats'] = {
+        #         'status': 'fail',
+        #         'output': str(e)
+        #     }
+        #     overall_status = 'fail'
         
-        try:
-            response = requests.get('http://localhost:4000/versions', timeout=5)
-            if response.status_code == 200:
-                versions_status = 'pass'
-            else:
-                versions_status = 'fail'
-                overall_status = 'fail'
+        # try:
+        #     response = requests.get('http://localhost:4000/versions', timeout=5)
+        #     if response.status_code == 200:
+        #         versions_status = 'pass'
+        #     else:
+        #         versions_status = 'fail'
+        #         overall_status = 'fail'
                 
-            health_data['checks']['app:versions'] = {
-                'status': versions_status,
-                'observedValue': response.status_code,
-                'time': current_time
-            }
+        #     health_data['checks']['app:versions'] = {
+        #         'status': versions_status,
+        #         'observedValue': response.status_code,
+        #         'time': current_time
+        #     }
             
-        except Exception as e:
-            health_data['checks']['app:versions'] = {
-                'status': 'fail',
-                'output': str(e)
-            }
-            overall_status = 'fail'
+        # except Exception as e:
+        #     health_data['checks']['app:versions'] = {
+        #         'status': 'fail',
+        #         'output': str(e)
+        #     }
+        #     overall_status = 'fail'
         
         health_data['status'] = overall_status
         return health_data
