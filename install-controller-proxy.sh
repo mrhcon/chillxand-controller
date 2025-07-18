@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.245"
+CHILLXAND_VERSION="v1.0.246"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -285,69 +285,6 @@ setup_service() {
     fi
 }
 
-# Configure firewall with IP restrictions
-# setup_firewall() {
-#     log "Configuring UFW firewall with IP restrictions..."
-    
-#     # Check if UFW is installed and available
-#     if ! command -v ufw &> /dev/null; then
-#         warn "UFW is not installed or not available. Skipping firewall configuration."
-#         warn "Port 3001 may not be accessible from outside without manual firewall configuration."
-#         return
-#     fi
-    
-#     # Reset UFW rules to ensure clean state
-#     log "Resetting UFW rules..."
-#     ufw --force reset
-    
-#     # Set default policies
-#     log "Setting default UFW policies..."
-#     ufw default deny incoming
-#     ufw default allow outgoing
-    
-#     # Allow SSH (important - don't lock yourself out!)
-#     log "Allowing SSH access..."
-#     ufw allow ssh
-    
-#     # Allow the specific IPs to access port 3001
-#     log "Adding IP whitelist rules for port 3001..."
-    
-#     # Master (USA)
-#     ufw allow from 74.208.234.116 to any port 3001 comment 'Master USA'
-#     log "Added rule for Master (USA): 74.208.234.116"
-    
-#     # Control2 (Germany)
-#     ufw allow from 85.215.145.173 to any port 3001 comment 'Control2 Germany'
-#     log "Added rule for Control2 (Germany): 85.215.145.173"
-    
-#     # Control3 (Spain)
-#     ufw allow from 194.164.163.124 to any port 3001 comment 'Control3 Spain'
-#     log "Added rule for Control3 (Spain): 194.164.163.124"
-    
-#     # Home
-#     ufw allow from 174.114.192.84 to any port 3001 comment 'Home'
-#     log "Added rule for Home: 174.114.192.84"
-
-#     # Home #2
-#     ufw allow from 67.70.165.78 to any port 3001 comment 'Home'
-#     log "Added rule for Home #2: 67.70.165.78"
-    
-#     # Allow localhost access
-#     ufw allow from 127.0.0.1 to any port 3001 comment 'Localhost'
-#     log "Added rule for localhost: 127.0.0.1"
-    
-#     # Explicitly deny all other access to port 3001
-#     ufw deny 3001 comment 'Deny all other access to port 3001'
-#     log "Added deny rule for all other IPs on port 3001"
-    
-#     # Enable UFW
-#     log "Enabling UFW firewall..."
-#     ufw --force enable
-    
-#     # Show the status
-#     log "UFW firewall configuration complete. Current rules:"
-#     ufw status numbered
-# }
 setup_firewall() {
     log "Configuring UFW firewall with IP restrictions..."
     
