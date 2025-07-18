@@ -9,7 +9,7 @@ import os
 from datetime import datetime, timezone
 
 # ChillXand Controller Version
-CHILLXAND_CONTROLLER_VERSION = "$CHILLXAND_VERSION"
+CHILLXAND_CONTROLLER_VERSION = "{{CHILLXAND_VERSION}}"
 UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
