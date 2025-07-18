@@ -61,7 +61,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             # Fallback to localhost if we can't determine IP
             return "localhost"
-    
+
+    def _get_server_name(self):
+        """Get the server's hostname"""
+        try:
+            import socket
+            return socket.gethostname()
+        except Exception:
+            return "unknown"
+
+    def _get_server_info(self):
+        """Get server IP and hostname"""
+        return {
+            'ip': self._get_server_ip(),
+            'hostname': self._get_server_name()
+        }    
+        
     def _get_current_time(self):
         return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     
@@ -123,7 +138,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 
                 return {
                     'status': 'pass' if found_ip else 'fail',
-                    'server_ip': server_ip,
+                    'server_info': server_info,
                     'atlas_url': ATLAS_API_URL,
                     'registered': found_ip,
                     'pod_entry': found_pod,
@@ -134,7 +149,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             else:
                 return {
                     'status': 'fail',
-                    'server_ip': server_ip,
+                    'server_info': server_info,
                     'atlas_url': ATLAS_API_URL,
                     'registered': False,
                     'response_code': response.status_code,
@@ -248,7 +263,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             results = {
                 'status': 'pass',
                 'time': current_time,
-                'server_ip': server_ip,
+                'server_info': server_info,
                 'checks': {}
             }
             
