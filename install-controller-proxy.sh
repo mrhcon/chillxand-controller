@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.221"
+CHILLXAND_VERSION="v1.0.222"
 
 set -e  # Exit on any error
 
@@ -627,8 +627,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 version_cmd = f'DOWNLOADED_VERSION={dollar}{open_paren}grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 | cut -d\'"\' -f2{close_paren}'
                 echo_version_cmd = f'echo "Downloaded version: {dollar}DOWNLOADED_VERSION" >> /tmp/update.log 2>&1'
                 
-                script_lines.append(grep_cmd1)
-                script_lines.append(grep_cmd2)
                 script_lines.append(version_cmd)
                 script_lines.append(echo_version_cmd)
                 
