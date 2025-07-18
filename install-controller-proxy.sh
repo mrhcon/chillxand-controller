@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.217"
+CHILLXAND_VERSION="v1.0.218"
 
 set -e  # Exit on any error
 
@@ -591,57 +591,121 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 }
                 self._save_update_state(update_state)
                 
-                # Create update script
-                script_content = """#!/bin/bash
-set -e
-sleep 2
+#                 # Create update script
+#                 script_content = """#!/bin/bash
+# set -e
+# sleep 2
 
-echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
-echo "Current version: CURRENT_VERSION_PLACEHOLDER" >> /tmp/update.log 2>&1
-echo "Target version: TARGET_VERSION_PLACEHOLDER" >> /tmp/update.log 2>&1
-echo "Cache-busting: CACHE_BUST_PLACEHOLDER" >> /tmp/update.log 2>&1
+# echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1
+# echo "Current version: CURRENT_VERSION_PLACEHOLDER" >> /tmp/update.log 2>&1
+# echo "Target version: TARGET_VERSION_PLACEHOLDER" >> /tmp/update.log 2>&1
+# echo "Cache-busting: CACHE_BUST_PLACEHOLDER" >> /tmp/update.log 2>&1
 
-cd /tmp
-echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
+# cd /tmp
+# echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
 
-# Clean up any existing files
-rm -f install-controller-proxy.sh install-controller-proxy-*.sh
-echo "Cleaned up existing files" >> /tmp/update.log 2>&1
+# # Clean up any existing files
+# rm -f install-controller-proxy.sh install-controller-proxy-*.sh
+# echo "Cleaned up existing files" >> /tmp/update.log 2>&1
 
-#  Download fresh file
-echo "Downloading fresh script..." >> /tmp/update.log 2>&1
-wget --no-cache --no-cookies --user-agent="ChillXandController/TIMESTAMP_PLACEHOLDER" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb=CACHE_BUST_PLACEHOLDER" >> /tmp/update.log 2>&1
+# #  Download fresh file
+# echo "Downloading fresh script..." >> /tmp/update.log 2>&1
+# wget --no-cache --no-cookies --user-agent="ChillXandController/TIMESTAMP_PLACEHOLDER" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb=CACHE_BUST_PLACEHOLDER" >> /tmp/update.log 2>&1
 
-sleep 5
+# sleep 5
 
-echo "1Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh)" >> /tmp/update.log 2>&1
-echo "2Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 )" >> /tmp/update.log 2>&1
-DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
-echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+# echo "1Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh)" >> /tmp/update.log 2>&1
+# echo "2Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 )" >> /tmp/update.log 2>&1
+# DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+# echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
 
-chmod +x install-controller-proxy.sh
-echo "Made file executable" >> /tmp/update.log 2>&1
+# chmod +x install-controller-proxy.sh
+# echo "Made file executable" >> /tmp/update.log 2>&1
 
-# Create marker file before running installer
-touch /tmp/update-in-progress
+# # Create marker file before running installer
+# touch /tmp/update-in-progress
 
-# Run installer - this will likely terminate our script when service restarts
-echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
-./install-controller-proxy.sh >> /tmp/update.log 2>&1
+# # Run installer - this will likely terminate our script when service restarts
+# echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
+# ./install-controller-proxy.sh >> /tmp/update.log 2>&1
 
-echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
-rm -f /tmp/update-in-progress /tmp/update-controller.sh
-"""
+# echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
+# rm -f /tmp/update-in-progress /tmp/update-controller.sh
+# """
 
-                # Now do simple string replacements using the variables that were defined earlier in this method
-                script_content = script_content.replace('CURRENT_VERSION_PLACEHOLDER', current_version)
-                script_content = script_content.replace('TARGET_VERSION_PLACEHOLDER', github_version)  
-                script_content = script_content.replace('CACHE_BUST_PLACEHOLDER', cache_bust)
-                script_content = script_content.replace('TIMESTAMP_PLACEHOLDER', timestamp)
+#                 # Now do simple string replacements using the variables that were defined earlier in this method
+#                 script_content = script_content.replace('CURRENT_VERSION_PLACEHOLDER', current_version)
+#                 script_content = script_content.replace('TARGET_VERSION_PLACEHOLDER', github_version)  
+#                 script_content = script_content.replace('CACHE_BUST_PLACEHOLDER', cache_bust)
+#                 script_content = script_content.replace('TIMESTAMP_PLACEHOLDER', timestamp)
+                
+#                 # Write the final script
+#                 with open('/tmp/update-controller.sh', 'w') as f:
+#                     f.write(script_content)
+
+                # Build script completely avoiding $(...) patterns during construction
+                script_lines = []
+                script_lines.append('#!/bin/bash')
+                script_lines.append('set -e')
+                script_lines.append('sleep 2')
+                script_lines.append('')
+                script_lines.append('echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1')
+                script_lines.append(f'echo "Current version: {current_version}" >> /tmp/update.log 2>&1')
+                script_lines.append(f'echo "Target version: {github_version}" >> /tmp/update.log 2>&1')
+                script_lines.append(f'echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1')
+                script_lines.append('')
+                script_lines.append('cd /tmp')
+                
+                # Build the problematic line by concatenating parts - no $() until final assembly
+                working_dir_cmd = 'echo "Working directory: ' + '$' + '(pwd)" >> /tmp/update.log 2>&1'
+                script_lines.append(working_dir_cmd)
+                
+                script_lines.append('')
+                script_lines.append('# Clean up any existing files')
+                script_lines.append('rm -f install-controller-proxy.sh install-controller-proxy-*.sh')
+                script_lines.append('echo "Cleaned up existing files" >> /tmp/update.log 2>&1')
+                script_lines.append('')
+                script_lines.append('#  Download fresh file')
+                script_lines.append('echo "Downloading fresh script..." >> /tmp/update.log 2>&1')
+                script_lines.append(f'wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1')
+                script_lines.append('')
+                script_lines.append('sleep 5')
+                script_lines.append('')
+                
+                # Build grep commands piece by piece to avoid execution
+                dollar = '$'
+                open_paren = '('
+                close_paren = ')'
+                grep_cmd1 = f'echo "1Downloaded version: {dollar}{open_paren}grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh{close_paren}" >> /tmp/update.log 2>&1'
+                grep_cmd2 = f'echo "2Downloaded version: {dollar}{open_paren}grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 {close_paren}" >> /tmp/update.log 2>&1'
+                version_cmd = f'DOWNLOADED_VERSION={dollar}{open_paren}grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 | cut -d\'"\' -f2{close_paren}'
+                echo_version_cmd = f'echo "Downloaded version: {dollar}DOWNLOADED_VERSION" >> /tmp/update.log 2>&1'
+                
+                script_lines.append(grep_cmd1)
+                script_lines.append(grep_cmd2)
+                script_lines.append(version_cmd)
+                script_lines.append(echo_version_cmd)
+                
+                script_lines.append('')
+                script_lines.append('chmod +x install-controller-proxy.sh')
+                script_lines.append('echo "Made file executable" >> /tmp/update.log 2>&1')
+                script_lines.append('')
+                script_lines.append('# Create marker file before running installer')
+                script_lines.append('touch /tmp/update-in-progress')
+                script_lines.append('')
+                script_lines.append('# Run installer - this will likely terminate our script when service restarts')
+                script_lines.append('echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1')
+                script_lines.append('./install-controller-proxy.sh >> /tmp/update.log 2>&1')
+                script_lines.append('')
+                script_lines.append('echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1')
+                script_lines.append('rm -f /tmp/update-in-progress /tmp/update-controller.sh')
+                
+                # Join all lines - no command substitution patterns exist during processing
+                final_script = '\n'.join(script_lines)
                 
                 # Write the final script
                 with open('/tmp/update-controller.sh', 'w') as f:
-                    f.write(script_content)
+                    f.write(final_script)
                 
                 subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
                 
