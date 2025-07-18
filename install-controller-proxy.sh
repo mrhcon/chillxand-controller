@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.212"
+CHILLXAND_VERSION="v1.0.213"
 
 set -e  # Exit on any error
 
@@ -637,40 +637,52 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 #     cache_bust=cache_bust,
 #     timestamp=timestamp
 # )
-               update_script = (
-                    '#!/bin/bash\n'
-                    'set -e\n'
-                    'sleep 2\n\n'
-                    'echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1\n'
-                    'echo "Current version: ' + current_version + '" >> /tmp/update.log 2>&1\n'
-                    'echo "Target version: ' + github_version + '" >> /tmp/update.log 2>&1\n'
-                    'echo "Cache-busting: ' + cache_bust + '" >> /tmp/update.log 2>&1\n\n'
-                    'cd /tmp\n'
-                    'echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1\n\n'
-                    '# Clean up any existing files\n'
-                    'rm -f install-controller-proxy.sh install-controller-proxy-*.sh\n'
-                    'echo "Cleaned up existing files" >> /tmp/update.log 2>&1\n\n'
-                    '#  Download fresh file\n'
-                    'echo "Downloading fresh script..." >> /tmp/update.log 2>&1\n'
-                    'wget --no-cache --no-cookies --user-agent="ChillXandController/' + timestamp + '" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb=' + cache_bust + '" >> /tmp/update.log 2>&1\n\n'
-                    'sleep 5\n\n'
-                    'echo "1Downloaded version: $(grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh)" >> /tmp/update.log 2>&1\n'
-                    'echo "2Downloaded version: $(grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 )" >> /tmp/update.log 2>&1\n'
-                    'DOWNLOADED_VERSION=$(grep \'CHILLXAND_VERSION=\' install-controller-proxy.sh | head -1 | cut -d\'"\' -f2)\n'
-                    'echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1\n\n'
-                    'chmod +x install-controller-proxy.sh\n'
-                    'echo "Made file executable" >> /tmp/update.log 2>&1\n\n'
-                    '# Create marker file before running installer\n'
-                    'touch /tmp/update-in-progress\n\n'
-                    '# Run installer - this will likely terminate our script when service restarts\n'
-                    'echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1\n'
-                    './install-controller-proxy.sh >> /tmp/update.log 2>&1\n\n'
-                    'echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1\n'
-                    'rm -f /tmp/update-in-progress /tmp/update-controller.sh\n'
-                )
                 
+                # with open('/tmp/update-controller.sh', 'w') as f:
+                    # f.write(update_script)
+                # Write the script line by line to avoid any string processing issues
                 with open('/tmp/update-controller.sh', 'w') as f:
-                    f.write(update_script)
+                    f.write('#!/bin/bash\n')
+                    f.write('set -e\n')
+                    f.write('sleep 2\n\n')
+                    f.write('echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1\n')
+                    f.write(f'echo "Current version: {current_version}" >> /tmp/update.log 2>&1\n')
+                    f.write(f'echo "Target version: {github_version}" >> /tmp/update.log 2>&1\n')
+                    f.write(f'echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1\n\n')
+                    f.write('cd /tmp\n')
+                    f.write('echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1\n\n')
+                    f.write('# Clean up any existing files\n')
+                    f.write('rm -f install-controller-proxy.sh install-controller-proxy-*.sh\n')
+                    f.write('echo "Cleaned up existing files" >> /tmp/update.log 2>&1\n\n')
+                    f.write('#  Download fresh file\n')
+                    f.write('echo "Downloading fresh script..." >> /tmp/update.log 2>&1\n')
+                    f.write(f'wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1\n\n')
+                    f.write('sleep 5\n\n')
+                    # Write the problematic lines character by character to avoid interpretation
+                    f.write('echo "1Downloaded version: ')
+                    f.write('$(')
+                    f.write("grep 'CHILLXAND_VERSION=' install-controller-proxy.sh")
+                    f.write(')" >> /tmp/update.log 2>&1\n')
+                    f.write('echo "2Downloaded version: ')
+                    f.write('$(')
+                    f.write("grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1")
+                    f.write(')" >> /tmp/update.log 2>&1\n')
+                    f.write('DOWNLOADED_VERSION=')
+                    f.write('$(')
+                    f.write("grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'\"' -f2")
+                    f.write(')\n')
+                    f.write('echo "Downloaded version: ')
+                    f.write('$')
+                    f.write('DOWNLOADED_VERSION" >> /tmp/update.log 2>&1\n\n')
+                    f.write('chmod +x install-controller-proxy.sh\n')
+                    f.write('echo "Made file executable" >> /tmp/update.log 2>&1\n\n')
+                    f.write('# Create marker file before running installer\n')
+                    f.write('touch /tmp/update-in-progress\n\n')
+                    f.write('# Run installer - this will likely terminate our script when service restarts\n')
+                    f.write('echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1\n')
+                    f.write('./install-controller-proxy.sh >> /tmp/update.log 2>&1\n\n')
+                    f.write('echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1\n')
+                    f.write('rm -f /tmp/update-in-progress /tmp/update-controller.sh\n')                    
                 
                 subprocess.run(['chmod', '+x', '/tmp/update-controller.sh'], timeout=5)
                 
