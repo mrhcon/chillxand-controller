@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.208"
+CHILLXAND_VERSION="v1.0.209"
 
 set -e  # Exit on any error
 
@@ -592,7 +592,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 self._save_update_state(update_state)
                 
                 # Create update script
-                update_script = f'''#!/bin/bash
+# Create update script using .format() to avoid f-string dollar sign issues
+update_script = '''#!/bin/bash
 set -e
 sleep 2
 
@@ -602,7 +603,7 @@ echo "Target version: {github_version}" >> /tmp/update.log 2>&1
 echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1
 
 cd /tmp
-echo "Working directory: $$(pwd)" >> /tmp/update.log 2>&1
+echo "Working directory: $(pwd)" >> /tmp/update.log 2>&1
 
 # Clean up any existing files
 rm -f install-controller-proxy.sh install-controller-proxy-*.sh
@@ -614,10 +615,10 @@ wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O i
 
 sleep 5
 
-echo "1Downloaded version: $$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh)" >> /tmp/update.log 2>&1
-echo "2Downloaded version: $$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 )" >> /tmp/update.log 2>&1
-DOWNLOADED_VERSION=$$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
-echo "Downloaded version: $$DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
+echo "1Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh)" >> /tmp/update.log 2>&1
+echo "2Downloaded version: $(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 )" >> /tmp/update.log 2>&1
+DOWNLOADED_VERSION=$(grep 'CHILLXAND_VERSION=' install-controller-proxy.sh | head -1 | cut -d'"' -f2)
+echo "Downloaded version: $DOWNLOADED_VERSION" >> /tmp/update.log 2>&1
 
 chmod +x install-controller-proxy.sh
 echo "Made file executable" >> /tmp/update.log 2>&1
@@ -631,7 +632,12 @@ echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1
 
 echo "Installer completed, service should restart automatically" >> /tmp/update.log 2>&1
 rm -f /tmp/update-in-progress /tmp/update-controller.sh
-'''
+'''.format(
+    current_version=current_version,
+    github_version=github_version,
+    cache_bust=cache_bust,
+    timestamp=timestamp
+)
            
                 with open('/tmp/update-controller.sh', 'w') as f:
                     f.write(update_script)
