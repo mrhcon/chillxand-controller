@@ -114,7 +114,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Check if this server's IP is registered in Atlas"""
         try:
             # Get our server IP using existing function
-            server_ip = self._get_server_ip()
+            server_info = self._get_server_info()
             
             # Query Atlas API
             response = requests.get(ATLAS_API_URL, timeout=10)
@@ -344,7 +344,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Check UDP 5000 public access and localhost TCP ports"""
         try:
             current_time = self._get_current_time()
-            server_ip = self._get_server_ip()
+            server_info = self._get_server_info()
             
             results = {
                 'status': 'pass',
@@ -873,7 +873,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _get_health_data(self):
         # Get basic info first
         current_time = self._get_current_time()
-        server_ip = self._get_server_ip()
+        server_info = self._get_server_info()
         
         health_data = {
             'status': 'pass',
