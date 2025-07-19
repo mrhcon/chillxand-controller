@@ -115,6 +115,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         try:
             # Get our server IP using existing function
             server_info = self._get_server_info()
+            server_ip = self._get_server_ip()
             
             # Query Atlas API
             response = requests.get(ATLAS_API_URL, timeout=10)
@@ -345,6 +346,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         try:
             current_time = self._get_current_time()
             server_info = self._get_server_info()
+            server_ip = self._get_server_ip()
             
             results = {
                 'status': 'pass',
@@ -874,6 +876,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         # Get basic info first
         current_time = self._get_current_time()
         server_info = self._get_server_info()
+        server_ip = self._get_server_ip()
         
         health_data = {
             'status': 'pass',
