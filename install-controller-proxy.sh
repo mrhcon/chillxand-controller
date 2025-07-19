@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.260"
+CHILLXAND_VERSION="v1.0.261"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -17,14 +17,10 @@ declare -A ALLOWED_IPS=(
     ["174.114.192.84"]="Home"
     ["67.70.165.78"]="Home #2"
     ["127.0.0.1"]="Localhost"
-    ["208.38.22.232"]="DataCenter Subnet"
-    ["208.38.22.233"]="DataCenter Subnet"
-    ["208.38.22.234"]="DataCenter Subnet"
     ["208.38.22.235"]="DataCenter Subnet"
     ["208.38.22.236"]="DataCenter Subnet"
     ["208.38.22.237"]="DataCenter Subnet"
     ["208.38.22.238"]="DataCenter Subnet"
-    ["208.38.22.239"]="DataCenter Subnet"
 )
 
 set -e  # Exit on any error
