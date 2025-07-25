@@ -880,7 +880,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         
         health_data = {
             'status': 'pass',
-            'version': '1',
+            'versions': self._get_versions_data(), 
             'serviceId': 'xandeum-node',
             'description': 'Xandeum Node Health Check',
             'chillxand_controller_version': CHILLXAND_CONTROLLER_VERSION,
