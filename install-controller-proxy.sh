@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.276"
+CHILLXAND_VERSION="v1.0.278"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -402,7 +402,7 @@ setup_ufw_basics() {
 
 check_and_fix_basic_rules() {
     log "Checking basic rules (IPv4 and IPv6)..."
-    
+
     # Check SSH rule
     if ufw status | grep -q "22/tcp.*ALLOW.*Anywhere"; then
         log "✓ SSH rule exists"
@@ -410,7 +410,7 @@ check_and_fix_basic_rules() {
         log "Adding SSH rule..."
         ufw allow 22/tcp comment 'SSH access'
     fi
-    
+
     # Check UDP 5000 rule
     if ufw status | grep -q "5000/udp.*ALLOW.*Anywhere"; then
         log "✓ UDP 5000 rule exists"
@@ -418,28 +418,29 @@ check_and_fix_basic_rules() {
         log "Adding UDP 5000 rule..."
         ufw allow 5000/udp comment 'Pod UDP - Public access'
     fi
-    
+
     # Check localhost-only rules and fix broad rules
     local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
-    
+
     for port_desc in "${local_ports[@]}"; do
         IFS=':' read -r port desc <<< "$port_desc"
-        
-        # Check for and remove unwanted broad IPv4 rules first
-        # Pattern: port/tcp + spaces + ALLOW + spaces + Anywhere + optional spaces/comments
-        if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+
+        # FIXED: Check for and remove unwanted broad IPv4 rules first
+        # More reliable single grep pattern for IPv4 rules (excludes v6)
+        if ufw status | grep -E "^${port}/tcp.*ALLOW.*Anywhere[[:space:]]*(\#.*)?$" | grep -v "(v6)"; then
             log "⚠️  Removing unwanted IPv4 broad rule for port $port"
             ufw delete allow "${port}/tcp"
             log "Removed IPv4 broad allow rule for port $port"
         fi
-        
-        # Check for and remove unwanted broad IPv6 rules
-        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+
+        # FIXED: Check for and remove unwanted broad IPv6 rules
+        # More precise pattern for IPv6 rules
+        if ufw status | grep -E "^${port}/tcp \(v6\).*ALLOW.*Anywhere \(v6\)"; then
             log "⚠️  Removing unwanted IPv6 broad rule for port $port"
             ufw delete allow "${port}/tcp"
             log "Removed IPv6 broad allow rule for port $port"
         fi
-        
+
         # Now check if localhost rule exists and add if missing
         if ufw status | grep -q "${port}.*ALLOW.*127.0.0.1"; then
             log "✓ Localhost rule for port $port exists"
@@ -448,7 +449,7 @@ check_and_fix_basic_rules() {
             ufw allow from 127.0.0.1 to any port "$port" comment "$desc - Local only"
         fi
     done
-    
+
     # Check 3001 deny rule (should be last)
     if ufw status | grep -q "3001.*DENY.*Anywhere"; then
         log "✓ 3001 deny rule exists"
@@ -508,38 +509,37 @@ check_and_fix_3001_rules() {
 
 remove_unwanted_rules() {
     log "Checking for and removing unwanted rules (IPv4 and IPv6)..."
-    
+
     # Define ports that should NOT have broad ALLOW rules
     local protected_ports=("80" "3000" "4000")
-    
+
     for port in "${protected_ports[@]}"; do
-        # Check for broad IPv4 TCP rules on protected ports
-        # Use grep -v to exclude IPv6 lines when checking IPv4
-        if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+        # FIXED: Check for broad IPv4 TCP rules on protected ports
+        if ufw status | grep -E "^${port}/tcp.*ALLOW.*Anywhere[[:space:]]*(\#.*)?$" | grep -v "(v6)"; then
             log "⚠️  Found dangerous IPv4 broad rule for protected port $port"
             log "Removing dangerous IPv4 broad rule for port $port..."
             ufw delete allow "${port}/tcp"
             log "Removed IPv4 broad TCP rule for port $port"
         fi
-        
-        # Check for broad IPv6 TCP rules on protected ports  
-        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+
+        # FIXED: Check for broad IPv6 TCP rules on protected ports
+        if ufw status | grep -E "^${port}/tcp \(v6\).*ALLOW.*Anywhere \(v6\)"; then
             log "⚠️  Found dangerous IPv6 broad rule for protected port $port"
             log "Removing dangerous IPv6 broad rule for port $port..."
             ufw delete allow "${port}/tcp"
             log "Removed IPv6 broad TCP rule for port $port"
         fi
     done
-    
-    # Check for any 3001 rules that allow broader access than our IP list
-    if ufw status | grep "3001/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+
+    # FIXED: Check for any 3001 rules that allow broader access than our IP list
+    if ufw status | grep -E "^3001/tcp.*ALLOW.*Anywhere[[:space:]]*(\#.*)?$" | grep -v "(v6)"; then
         log "⚠️  Found dangerous IPv4 broad rule for port 3001"
         log "Removing dangerous IPv4 broad rule for port 3001..."
         ufw delete allow "3001/tcp"
         log "Removed IPv4 broad TCP rule for port 3001"
     fi
-    
-    if ufw status | grep -q "3001/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+
+    if ufw status | grep -E "^3001/tcp \(v6\).*ALLOW.*Anywhere \(v6\)"; then
         log "⚠️  Found dangerous IPv6 broad rule for port 3001"
         log "Removing dangerous IPv6 broad rule for port 3001..."
         ufw delete allow "3001/tcp"
