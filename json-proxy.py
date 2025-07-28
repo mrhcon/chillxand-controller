@@ -445,7 +445,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     #         }
 
     def _check_connectivity(self):
-        """Check UDP 5000 public access and localhost TCP ports"""
+        """Check UDP 5000 public access using external services and localhost TCP ports"""
         try:
             current_time = self._get_current_time()
             server_info = self._get_server_info()
@@ -460,21 +460,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             
             overall_status = 'pass'
             
-            # Enhanced UDP 5000 public accessibility check
+            # Check UDP 5000 public accessibility using external services
             try:
                 udp_checks = {}
                 
-                # 1. Check if port 5000 is bound/listening locally
+                # 1. Check if port 5000 is bound locally (prerequisite)
                 try:
                     ss_check = subprocess.run([
                         'ss', '-ulnp'
                     ], capture_output=True, text=True, timeout=5)
                     
                     if ss_check.returncode == 0:
-                        port_listening = ':5000 ' in ss_check.stdout or ' 5000 ' in ss_check.stdout
+                        port_listening = ':5000 ' in ss_check.stdout and '0.0.0.0:5000' in ss_check.stdout
                         udp_checks['local_bind'] = {
                             'listening': port_listening,
-                            'status': 'pass' if port_listening else 'fail'
+                            'status': 'pass' if port_listening else 'fail',
+                            'bind_address': '0.0.0.0:5000' if port_listening else 'not_found'
                         }
                         if not port_listening:
                             overall_status = 'fail'
@@ -494,154 +495,209 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     }
                     overall_status = 'fail'
                 
-                # 2. Check firewall rules (if iptables is available)
+                # 2. External service check using HackerTarget nmap API
                 try:
-                    iptables_check = subprocess.run([
-                        'iptables', '-L', '-n'
-                    ], capture_output=True, text=True, timeout=10)
+                    import requests
                     
-                    if iptables_check.returncode == 0:
-                        # Look for rules that might block UDP 5000
-                        rules_output = iptables_check.stdout
+                    # Use HackerTarget's online nmap service
+                    api_url = f"https://api.hackertarget.com/nmap/?q={server_ip}"
+                    
+                    response = requests.get(api_url, timeout=30)
+                    
+                    if response.status_code == 200:
+                        nmap_result = response.text
                         
-                        # Check for explicit ACCEPT rules for port 5000
-                        has_accept_rule = 'dpt:5000' in rules_output and 'ACCEPT' in rules_output
-                        
-                        # Check for explicit DROP/REJECT rules for port 5000
-                        has_block_rule = ('dpt:5000' in rules_output and 
-                                        ('DROP' in rules_output or 'REJECT' in rules_output))
-                        
-                        if has_block_rule:
-                            firewall_status = 'blocked'
-                            overall_status = 'fail'
-                        elif has_accept_rule:
-                            firewall_status = 'allowed'
+                        # Look for UDP port 5000 in results
+                        if '5000/udp' in nmap_result:
+                            if 'open' in nmap_result and '5000/udp' in nmap_result:
+                                external_status = 'open'
+                                external_accessible = True
+                            elif 'filtered' in nmap_result and '5000/udp' in nmap_result:
+                                external_status = 'filtered'
+                                external_accessible = False
+                            else:
+                                external_status = 'closed'
+                                external_accessible = False
                         else:
-                            firewall_status = 'default_policy'
+                            # If 5000/udp not in results, the service might not scan UDP by default
+                            external_status = 'not_scanned'
+                            external_accessible = None
                         
-                        udp_checks['firewall'] = {
-                            'status': 'pass' if firewall_status != 'blocked' else 'fail',
-                            'firewall_status': firewall_status,
-                            'has_explicit_allow': has_accept_rule,
-                            'has_explicit_block': has_block_rule
+                        udp_checks['external_nmap'] = {
+                            'service': 'hackertarget.com',
+                            'status': 'pass' if external_accessible else 'fail',
+                            'port_status': external_status,
+                            'accessible': external_accessible,
+                            'raw_result': nmap_result[:200] + '...' if len(nmap_result) > 200 else nmap_result
                         }
+                        
+                        if external_accessible is False:
+                            overall_status = 'fail'
+                        elif external_accessible is None and overall_status == 'pass':
+                            overall_status = 'warn'
+                            
                     else:
-                        udp_checks['firewall'] = {
+                        udp_checks['external_nmap'] = {
+                            'service': 'hackertarget.com',
                             'status': 'warn',
-                            'firewall_status': 'unknown',
-                            'error': 'iptables not accessible'
+                            'error': f'HTTP {response.status_code}',
+                            'accessible': None
                         }
                         if overall_status == 'pass':
                             overall_status = 'warn'
                             
                 except Exception as e:
-                    udp_checks['firewall'] = {
+                    udp_checks['external_nmap'] = {
+                        'service': 'hackertarget.com',
                         'status': 'warn',
-                        'firewall_status': 'unknown',
+                        'error': str(e),
+                        'accessible': None
+                    }
+                    if overall_status == 'pass':
+                        overall_status = 'warn'
+                
+                # 3. Alternative external check using portchecker.co
+                try:
+                    import requests
+                    
+                    # Use portchecker.co API for UDP testing
+                    api_url = f"https://api.portchecker.co/check"
+                    params = {
+                        'host': server_ip,
+                        'port': '5000',
+                        'protocol': 'udp'
+                    }
+                    
+                    response = requests.get(api_url, params=params, timeout=20)
+                    
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            
+                            # Parse the result (API format may vary)
+                            if isinstance(result, dict):
+                                port_open = result.get('open', False) or result.get('accessible', False)
+                                status_msg = result.get('status', 'unknown')
+                            else:
+                                # Fallback if response is not JSON
+                                port_open = 'open' in response.text.lower()
+                                status_msg = response.text[:100]
+                            
+                            udp_checks['external_portchecker'] = {
+                                'service': 'portchecker.co',
+                                'status': 'pass' if port_open else 'fail',
+                                'accessible': port_open,
+                                'message': status_msg
+                            }
+                            
+                            if not port_open:
+                                overall_status = 'fail'
+                                
+                        except Exception as parse_error:
+                            udp_checks['external_portchecker'] = {
+                                'service': 'portchecker.co',
+                                'status': 'warn',
+                                'error': f'Parse error: {str(parse_error)}',
+                                'raw_response': response.text[:200]
+                            }
+                            if overall_status == 'pass':
+                                overall_status = 'warn'
+                    else:
+                        udp_checks['external_portchecker'] = {
+                            'service': 'portchecker.co',
+                            'status': 'warn',
+                            'error': f'HTTP {response.status_code}',
+                            'accessible': None
+                        }
+                        if overall_status == 'pass':
+                            overall_status = 'warn'
+                            
+                except Exception as e:
+                    udp_checks['external_portchecker'] = {
+                        'service': 'portchecker.co',
+                        'status': 'warn',
+                        'error': str(e),
+                        'accessible': None
+                    }
+                    # Don't change overall_status for this optional check
+                
+                # 4. Local UFW rule verification
+                try:
+                    ufw_check = subprocess.run([
+                        'ufw', 'status'
+                    ], capture_output=True, text=True, timeout=5)
+                    
+                    if ufw_check.returncode == 0:
+                        ufw_allows = '5000/udp' in ufw_check.stdout and 'ALLOW' in ufw_check.stdout
+                        
+                        udp_checks['firewall_rule'] = {
+                            'status': 'pass' if ufw_allows else 'fail',
+                            'ufw_allows': ufw_allows,
+                            'rule_found': '5000/udp' in ufw_check.stdout
+                        }
+                        
+                        if not ufw_allows:
+                            overall_status = 'fail'
+                    else:
+                        udp_checks['firewall_rule'] = {
+                            'status': 'warn',
+                            'error': 'UFW status check failed'
+                        }
+                        if overall_status == 'pass':
+                            overall_status = 'warn'
+                            
+                except Exception as e:
+                    udp_checks['firewall_rule'] = {
+                        'status': 'warn',
                         'error': str(e)
                     }
                     if overall_status == 'pass':
                         overall_status = 'warn'
                 
-                # 3. Test external connectivity using netcat (if available)
-                try:
-                    nc_check = subprocess.run(['which', 'nc'], capture_output=True, timeout=5)
-                    if nc_check.returncode == 0:
-                        # Test UDP connectivity from localhost first
-                        udp_test_local = subprocess.run([
-                            'timeout', '5', 'nc', '-zu', '127.0.0.1', '5000'
-                        ], capture_output=True, timeout=10)
-                        
-                        local_reachable = udp_test_local.returncode == 0
-                        
-                        # Test UDP connectivity from external IP
-                        udp_test_external = subprocess.run([
-                            'timeout', '10', 'nc', '-zu', server_ip, '5000'
-                        ], capture_output=True, timeout=15)
-                        
-                        external_reachable = udp_test_external.returncode == 0
-                        
-                        udp_checks['connectivity'] = {
-                            'local_reachable': local_reachable,
-                            'external_reachable': external_reachable,
-                            'status': 'pass' if external_reachable else 'fail'
-                        }
-                        
-                        if not external_reachable:
-                            overall_status = 'fail'
-                    else:
-                        udp_checks['connectivity'] = {
-                            'status': 'warn',
-                            'error': 'netcat not available'
-                        }
-                        if overall_status == 'pass':
-                            overall_status = 'warn'
-                            
-                except Exception as e:
-                    udp_checks['connectivity'] = {
-                        'status': 'fail',
-                        'error': str(e)
-                    }
-                    overall_status = 'fail'
-                
-                # 4. Optional: Test with a simple UDP echo if service supports it
-                try:
-                    import socket
-                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    test_socket.settimeout(5)
-                    
-                    # Try to send a test packet to the UDP service
-                    test_message = b"health_check_ping"
-                    test_socket.sendto(test_message, (server_ip, 5000))
-                    
-                    # Try to receive a response (this depends on your UDP service implementation)
-                    try:
-                        response, addr = test_socket.recvfrom(1024)
-                        udp_checks['service_response'] = {
-                            'status': 'pass',
-                            'responsive': True,
-                            'response_received': True
-                        }
-                    except socket.timeout:
-                        # No response doesn't necessarily mean failure for UDP
-                        udp_checks['service_response'] = {
-                            'status': 'warn',
-                            'responsive': 'unknown',
-                            'response_received': False,
-                            'note': 'No response to test packet (normal for some UDP services)'
-                        }
-                    
-                    test_socket.close()
-                    
-                except Exception as e:
-                    udp_checks['service_response'] = {
-                        'status': 'warn',
-                        'error': str(e),
-                        'note': 'Could not test UDP service response'
-                    }
-                
                 # Determine overall UDP 5000 status
-                critical_checks = ['local_bind', 'connectivity']
-                critical_failures = [
-                    check for check in critical_checks 
-                    if udp_checks.get(check, {}).get('status') == 'fail'
-                ]
+                local_ok = udp_checks.get('local_bind', {}).get('status') == 'pass'
+                firewall_ok = udp_checks.get('firewall_rule', {}).get('status') == 'pass'
                 
-                if critical_failures:
-                    udp_status = 'fail'
-                    udp_message = f"UDP 5000 NOT PUBLIC - Critical failures: {', '.join(critical_failures)}"
-                elif any(udp_checks.get(check, {}).get('status') == 'warn' for check in udp_checks):
-                    udp_status = 'warn'
-                    udp_message = "UDP 5000 status uncertain - Some checks could not be completed"
-                else:
+                # Check if any external service confirms accessibility
+                external_accessible = False
+                external_services_tried = 0
+                external_services_passed = 0
+                
+                for check_name in ['external_nmap', 'external_portchecker']:
+                    check = udp_checks.get(check_name, {})
+                    if check.get('accessible') is not None:
+                        external_services_tried += 1
+                        if check.get('accessible'):
+                            external_services_passed += 1
+                            external_accessible = True
+                
+                # Generate final status message
+                if local_ok and firewall_ok and external_accessible:
                     udp_status = 'pass'
-                    udp_message = "UDP 5000 PUBLIC and accessible"
+                    udp_message = "UDP 5000 PUBLIC - Confirmed by external services"
+                elif local_ok and firewall_ok and external_services_tried == 0:
+                    udp_status = 'warn'
+                    udp_message = "UDP 5000 configured correctly - External verification unavailable"
+                elif local_ok and firewall_ok:
+                    udp_status = 'fail'
+                    udp_message = f"UDP 5000 NOT PUBLIC - External services confirm blocking ({external_services_passed}/{external_services_tried} passed)"
+                elif not local_ok:
+                    udp_status = 'fail'
+                    udp_message = "UDP 5000 NOT PUBLIC - Service not bound to public interface"
+                elif not firewall_ok:
+                    udp_status = 'fail'
+                    udp_message = "UDP 5000 NOT PUBLIC - Firewall blocking"
+                else:
+                    udp_status = 'warn'
+                    udp_message = "UDP 5000 status uncertain - Configuration issues detected"
                 
                 results['checks']['udp_5000_public'] = {
                     'status': udp_status,
                     'message': udp_message,
                     'accessible': udp_status == 'pass',
-                    'detailed_checks': udp_checks
+                    'detailed_checks': udp_checks,
+                    'external_services_tried': external_services_tried,
+                    'external_services_passed': external_services_passed
                 }
                 
                 if udp_status == 'fail':
@@ -671,13 +727,13 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                         if port_pattern in ss_check.stdout:
                             results['checks'][f'localhost_tcp_{port}'] = {
                                 'status': 'pass',
-                                'message': f'Port {port} listening',
+                                'message': f'Port {port} listening on localhost',
                                 'listening': True
                             }
                         else:
                             results['checks'][f'localhost_tcp_{port}'] = {
                                 'status': 'fail',
-                                'message': f'Port {port} not listening',
+                                'message': f'Port {port} not listening on localhost',
                                 'listening': False
                             }
                             overall_status = 'fail'
@@ -708,339 +764,339 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': self._get_current_time()
             }
 
-    def _debug_udp_5000(self):
-        """Comprehensive UDP 5000 debugging with detailed error reporting"""
-        try:
-            current_time = self._get_current_time()
-            server_ip = self._get_server_ip()
+    # def _debug_udp_5000(self):
+    #     """Comprehensive UDP 5000 debugging with detailed error reporting"""
+    #     try:
+    #         current_time = self._get_current_time()
+    #         server_ip = self._get_server_ip()
             
-            debug_results = {
-                'timestamp': current_time,
-                'server_ip': server_ip,
-                'checks': {},
-                'recommendations': []
-            }
+    #         debug_results = {
+    #             'timestamp': current_time,
+    #             'server_ip': server_ip,
+    #             'checks': {},
+    #             'recommendations': []
+    #         }
             
-            # 1. Detailed port binding check
-            print("=== UDP 5000 DEBUG: Checking port binding ===")
-            try:
-                # Check with ss command
-                ss_result = subprocess.run([
-                    'ss', '-ulnp', 'sport', '=', '5000'
-                ], capture_output=True, text=True, timeout=10)
+    #         # 1. Detailed port binding check
+    #         print("=== UDP 5000 DEBUG: Checking port binding ===")
+    #         try:
+    #             # Check with ss command
+    #             ss_result = subprocess.run([
+    #                 'ss', '-ulnp', 'sport', '=', '5000'
+    #             ], capture_output=True, text=True, timeout=10)
                 
-                debug_results['checks']['port_binding'] = {
-                    'command': 'ss -ulnp sport = 5000',
-                    'return_code': ss_result.returncode,
-                    'stdout': ss_result.stdout,
-                    'stderr': ss_result.stderr,
-                    'analysis': {}
-                }
+    #             debug_results['checks']['port_binding'] = {
+    #                 'command': 'ss -ulnp sport = 5000',
+    #                 'return_code': ss_result.returncode,
+    #                 'stdout': ss_result.stdout,
+    #                 'stderr': ss_result.stderr,
+    #                 'analysis': {}
+    #             }
                 
-                if ss_result.returncode == 0:
-                    if ss_result.stdout.strip():
-                        # Port is bound
-                        lines = ss_result.stdout.strip().split('\n')
-                        for line in lines[1:]:  # Skip header
-                            if '5000' in line:
-                                parts = line.split()
-                                if len(parts) >= 5:
-                                    local_addr = parts[4]
-                                    debug_results['checks']['port_binding']['analysis'] = {
-                                        'bound': True,
-                                        'bind_address': local_addr,
-                                        'status': 'listening'
-                                    }
+    #             if ss_result.returncode == 0:
+    #                 if ss_result.stdout.strip():
+    #                     # Port is bound
+    #                     lines = ss_result.stdout.strip().split('\n')
+    #                     for line in lines[1:]:  # Skip header
+    #                         if '5000' in line:
+    #                             parts = line.split()
+    #                             if len(parts) >= 5:
+    #                                 local_addr = parts[4]
+    #                                 debug_results['checks']['port_binding']['analysis'] = {
+    #                                     'bound': True,
+    #                                     'bind_address': local_addr,
+    #                                     'status': 'listening'
+    #                                 }
                                     
-                                    # Check if bound to all interfaces or just localhost
-                                    if local_addr.startswith('0.0.0.0:') or local_addr.startswith('*:'):
-                                        debug_results['checks']['port_binding']['analysis']['public_bind'] = True
-                                    elif local_addr.startswith('127.0.0.1:') or local_addr.startswith('localhost:'):
-                                        debug_results['checks']['port_binding']['analysis']['public_bind'] = False
-                                        debug_results['recommendations'].append(
-                                            "Service is bound to localhost only. Change bind address to 0.0.0.0:5000 for public access."
-                                        )
-                    else:
-                        debug_results['checks']['port_binding']['analysis'] = {
-                            'bound': False,
-                            'status': 'not_listening'
-                        }
-                        debug_results['recommendations'].append(
-                            "No service is listening on UDP port 5000. Start the UDP service first."
-                        )
-                else:
-                    debug_results['checks']['port_binding']['analysis'] = {
-                        'bound': 'unknown',
-                        'error': f"ss command failed with code {ss_result.returncode}"
-                    }
+    #                                 # Check if bound to all interfaces or just localhost
+    #                                 if local_addr.startswith('0.0.0.0:') or local_addr.startswith('*:'):
+    #                                     debug_results['checks']['port_binding']['analysis']['public_bind'] = True
+    #                                 elif local_addr.startswith('127.0.0.1:') or local_addr.startswith('localhost:'):
+    #                                     debug_results['checks']['port_binding']['analysis']['public_bind'] = False
+    #                                     debug_results['recommendations'].append(
+    #                                         "Service is bound to localhost only. Change bind address to 0.0.0.0:5000 for public access."
+    #                                     )
+    #                 else:
+    #                     debug_results['checks']['port_binding']['analysis'] = {
+    #                         'bound': False,
+    #                         'status': 'not_listening'
+    #                     }
+    #                     debug_results['recommendations'].append(
+    #                         "No service is listening on UDP port 5000. Start the UDP service first."
+    #                     )
+    #             else:
+    #                 debug_results['checks']['port_binding']['analysis'] = {
+    #                     'bound': 'unknown',
+    #                     'error': f"ss command failed with code {ss_result.returncode}"
+    #                 }
                     
-            except Exception as e:
-                debug_results['checks']['port_binding'] = {
-                    'error': str(e),
-                    'status': 'check_failed'
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['port_binding'] = {
+    #                 'error': str(e),
+    #                 'status': 'check_failed'
+    #             }
             
-            # 2. Alternative port check using netstat
-            try:
-                netstat_result = subprocess.run([
-                    'netstat', '-ulnp'
-                ], capture_output=True, text=True, timeout=10)
+    #         # 2. Alternative port check using netstat
+    #         try:
+    #             netstat_result = subprocess.run([
+    #                 'netstat', '-ulnp'
+    #             ], capture_output=True, text=True, timeout=10)
                 
-                debug_results['checks']['netstat_check'] = {
-                    'command': 'netstat -ulnp',
-                    'return_code': netstat_result.returncode,
-                    'analysis': {}
-                }
+    #             debug_results['checks']['netstat_check'] = {
+    #                 'command': 'netstat -ulnp',
+    #                 'return_code': netstat_result.returncode,
+    #                 'analysis': {}
+    #             }
                 
-                if netstat_result.returncode == 0:
-                    port_5000_lines = [line for line in netstat_result.stdout.split('\n') if ':5000 ' in line]
-                    debug_results['checks']['netstat_check']['port_5000_entries'] = port_5000_lines
-                    debug_results['checks']['netstat_check']['analysis']['found_entries'] = len(port_5000_lines)
+    #             if netstat_result.returncode == 0:
+    #                 port_5000_lines = [line for line in netstat_result.stdout.split('\n') if ':5000 ' in line]
+    #                 debug_results['checks']['netstat_check']['port_5000_entries'] = port_5000_lines
+    #                 debug_results['checks']['netstat_check']['analysis']['found_entries'] = len(port_5000_lines)
                 
-            except Exception as e:
-                debug_results['checks']['netstat_check'] = {
-                    'error': str(e),
-                    'note': 'netstat may not be available on this system'
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['netstat_check'] = {
+    #                 'error': str(e),
+    #                 'note': 'netstat may not be available on this system'
+    #             }
             
-            # 3. Firewall detailed analysis
-            try:
-                # Check iptables INPUT chain specifically
-                iptables_input = subprocess.run([
-                    'iptables', '-L', 'INPUT', '-n', '--line-numbers'
-                ], capture_output=True, text=True, timeout=10)
+    #         # 3. Firewall detailed analysis
+    #         try:
+    #             # Check iptables INPUT chain specifically
+    #             iptables_input = subprocess.run([
+    #                 'iptables', '-L', 'INPUT', '-n', '--line-numbers'
+    #             ], capture_output=True, text=True, timeout=10)
                 
-                debug_results['checks']['firewall_input'] = {
-                    'command': 'iptables -L INPUT -n --line-numbers',
-                    'return_code': iptables_input.returncode,
-                    'stdout': iptables_input.stdout,
-                    'stderr': iptables_input.stderr,
-                    'analysis': {}
-                }
+    #             debug_results['checks']['firewall_input'] = {
+    #                 'command': 'iptables -L INPUT -n --line-numbers',
+    #                 'return_code': iptables_input.returncode,
+    #                 'stdout': iptables_input.stdout,
+    #                 'stderr': iptables_input.stderr,
+    #                 'analysis': {}
+    #             }
                 
-                if iptables_input.returncode == 0:
-                    rules = iptables_input.stdout
+    #             if iptables_input.returncode == 0:
+    #                 rules = iptables_input.stdout
                     
-                    # Look for UDP 5000 specific rules
-                    udp_5000_rules = []
-                    for line in rules.split('\n'):
-                        if '5000' in line and 'udp' in line.lower():
-                            udp_5000_rules.append(line.strip())
+    #                 # Look for UDP 5000 specific rules
+    #                 udp_5000_rules = []
+    #                 for line in rules.split('\n'):
+    #                     if '5000' in line and 'udp' in line.lower():
+    #                         udp_5000_rules.append(line.strip())
                     
-                    debug_results['checks']['firewall_input']['analysis'] = {
-                        'udp_5000_rules': udp_5000_rules,
-                        'rule_count': len(udp_5000_rules)
-                    }
+    #                 debug_results['checks']['firewall_input']['analysis'] = {
+    #                     'udp_5000_rules': udp_5000_rules,
+    #                     'rule_count': len(udp_5000_rules)
+    #                 }
                     
-                    # Check default policy
-                    if 'Chain INPUT (policy DROP' in rules:
-                        debug_results['checks']['firewall_input']['analysis']['default_policy'] = 'DROP'
-                        if not udp_5000_rules:
-                            debug_results['recommendations'].append(
-                                "Firewall has DROP policy and no explicit UDP 5000 ACCEPT rule. Add: iptables -A INPUT -p udp --dport 5000 -j ACCEPT"
-                            )
-                    elif 'Chain INPUT (policy ACCEPT' in rules:
-                        debug_results['checks']['firewall_input']['analysis']['default_policy'] = 'ACCEPT'
+    #                 # Check default policy
+    #                 if 'Chain INPUT (policy DROP' in rules:
+    #                     debug_results['checks']['firewall_input']['analysis']['default_policy'] = 'DROP'
+    #                     if not udp_5000_rules:
+    #                         debug_results['recommendations'].append(
+    #                             "Firewall has DROP policy and no explicit UDP 5000 ACCEPT rule. Add: iptables -A INPUT -p udp --dport 5000 -j ACCEPT"
+    #                         )
+    #                 elif 'Chain INPUT (policy ACCEPT' in rules:
+    #                     debug_results['checks']['firewall_input']['analysis']['default_policy'] = 'ACCEPT'
                     
-                # Check if ufw is active
-                try:
-                    ufw_status = subprocess.run([
-                        'ufw', 'status'
-                    ], capture_output=True, text=True, timeout=5)
+    #             # Check if ufw is active
+    #             try:
+    #                 ufw_status = subprocess.run([
+    #                     'ufw', 'status'
+    #                 ], capture_output=True, text=True, timeout=5)
                     
-                    debug_results['checks']['ufw_status'] = {
-                        'command': 'ufw status',
-                        'return_code': ufw_status.returncode,
-                        'stdout': ufw_status.stdout,
-                        'active': 'Status: active' in ufw_status.stdout if ufw_status.returncode == 0 else False
-                    }
+    #                 debug_results['checks']['ufw_status'] = {
+    #                     'command': 'ufw status',
+    #                     'return_code': ufw_status.returncode,
+    #                     'stdout': ufw_status.stdout,
+    #                     'active': 'Status: active' in ufw_status.stdout if ufw_status.returncode == 0 else False
+    #                 }
                     
-                    if 'Status: active' in ufw_status.stdout and '5000/udp' not in ufw_status.stdout:
-                        debug_results['recommendations'].append(
-                            "UFW is active but no rule for UDP 5000. Add: sudo ufw allow 5000/udp"
-                        )
+    #                 if 'Status: active' in ufw_status.stdout and '5000/udp' not in ufw_status.stdout:
+    #                     debug_results['recommendations'].append(
+    #                         "UFW is active but no rule for UDP 5000. Add: sudo ufw allow 5000/udp"
+    #                     )
                         
-                except Exception:
-                    debug_results['checks']['ufw_status'] = {'note': 'ufw not available or not installed'}
+    #             except Exception:
+    #                 debug_results['checks']['ufw_status'] = {'note': 'ufw not available or not installed'}
                     
-            except Exception as e:
-                debug_results['checks']['firewall_input'] = {
-                    'error': str(e),
-                    'note': 'iptables check failed - may need root privileges'
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['firewall_input'] = {
+    #                 'error': str(e),
+    #                 'note': 'iptables check failed - may need root privileges'
+    #             }
             
-            # 4. Network interface analysis
-            try:
-                ip_addr_result = subprocess.run([
-                    'ip', 'addr', 'show'
-                ], capture_output=True, text=True, timeout=10)
+    #         # 4. Network interface analysis
+    #         try:
+    #             ip_addr_result = subprocess.run([
+    #                 'ip', 'addr', 'show'
+    #             ], capture_output=True, text=True, timeout=10)
                 
-                if ip_addr_result.returncode == 0:
-                    interfaces = {}
-                    current_interface = None
+    #             if ip_addr_result.returncode == 0:
+    #                 interfaces = {}
+    #                 current_interface = None
                     
-                    for line in ip_addr_result.stdout.split('\n'):
-                        if line and not line.startswith(' '):
-                            # New interface
-                            parts = line.split(':')
-                            if len(parts) >= 2:
-                                current_interface = parts[1].strip()
-                                interfaces[current_interface] = {'addresses': []}
-                        elif current_interface and 'inet ' in line:
-                            # IP address line
-                            inet_part = line.strip().split('inet ')[1].split()[0]
-                            interfaces[current_interface]['addresses'].append(inet_part)
+    #                 for line in ip_addr_result.stdout.split('\n'):
+    #                     if line and not line.startswith(' '):
+    #                         # New interface
+    #                         parts = line.split(':')
+    #                         if len(parts) >= 2:
+    #                             current_interface = parts[1].strip()
+    #                             interfaces[current_interface] = {'addresses': []}
+    #                     elif current_interface and 'inet ' in line:
+    #                         # IP address line
+    #                         inet_part = line.strip().split('inet ')[1].split()[0]
+    #                         interfaces[current_interface]['addresses'].append(inet_part)
                     
-                    debug_results['checks']['network_interfaces'] = {
-                        'interfaces': interfaces,
-                        'server_ip_found': any(
-                            server_ip in str(addrs) for addrs in interfaces.values()
-                        )
-                    }
+    #                 debug_results['checks']['network_interfaces'] = {
+    #                     'interfaces': interfaces,
+    #                     'server_ip_found': any(
+    #                         server_ip in str(addrs) for addrs in interfaces.values()
+    #                     )
+    #                 }
                     
-            except Exception as e:
-                debug_results['checks']['network_interfaces'] = {
-                    'error': str(e)
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['network_interfaces'] = {
+    #                 'error': str(e)
+    #             }
             
-            # 5. Test actual connectivity
-            try:
-                # Test with timeout and specific error capture
-                nc_local_test = subprocess.run([
-                    'timeout', '3', 'nc', '-v', '-u', '-z', '127.0.0.1', '5000'
-                ], capture_output=True, text=True, timeout=5)
+    #         # 5. Test actual connectivity
+    #         try:
+    #             # Test with timeout and specific error capture
+    #             nc_local_test = subprocess.run([
+    #                 'timeout', '3', 'nc', '-v', '-u', '-z', '127.0.0.1', '5000'
+    #             ], capture_output=True, text=True, timeout=5)
                 
-                nc_external_test = subprocess.run([
-                    'timeout', '3', 'nc', '-v', '-u', '-z', server_ip, '5000'
-                ], capture_output=True, text=True, timeout=5)
+    #             nc_external_test = subprocess.run([
+    #                 'timeout', '3', 'nc', '-v', '-u', '-z', server_ip, '5000'
+    #             ], capture_output=True, text=True, timeout=5)
                 
-                debug_results['checks']['connectivity_tests'] = {
-                    'local_test': {
-                        'command': 'nc -v -u -z 127.0.0.1 5000',
-                        'return_code': nc_local_test.returncode,
-                        'stdout': nc_local_test.stdout,
-                        'stderr': nc_local_test.stderr,
-                        'success': nc_local_test.returncode == 0
-                    },
-                    'external_test': {
-                        'command': f'nc -v -u -z {server_ip} 5000',
-                        'return_code': nc_external_test.returncode,
-                        'stdout': nc_external_test.stdout,
-                        'stderr': nc_external_test.stderr,
-                        'success': nc_external_test.returncode == 0
-                    }
-                }
+    #             debug_results['checks']['connectivity_tests'] = {
+    #                 'local_test': {
+    #                     'command': 'nc -v -u -z 127.0.0.1 5000',
+    #                     'return_code': nc_local_test.returncode,
+    #                     'stdout': nc_local_test.stdout,
+    #                     'stderr': nc_local_test.stderr,
+    #                     'success': nc_local_test.returncode == 0
+    #                 },
+    #                 'external_test': {
+    #                     'command': f'nc -v -u -z {server_ip} 5000',
+    #                     'return_code': nc_external_test.returncode,
+    #                     'stdout': nc_external_test.stdout,
+    #                     'stderr': nc_external_test.stderr,
+    #                     'success': nc_external_test.returncode == 0
+    #                 }
+    #             }
                 
-            except Exception as e:
-                debug_results['checks']['connectivity_tests'] = {
-                    'error': str(e),
-                    'note': 'netcat connectivity tests failed'
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['connectivity_tests'] = {
+    #                 'error': str(e),
+    #                 'note': 'netcat connectivity tests failed'
+    #             }
             
-            # 6. Check for common UDP service processes
-            try:
-                # Look for processes that might be using port 5000
-                lsof_result = subprocess.run([
-                    'lsof', '-i', ':5000'
-                ], capture_output=True, text=True, timeout=10)
+    #         # 6. Check for common UDP service processes
+    #         try:
+    #             # Look for processes that might be using port 5000
+    #             lsof_result = subprocess.run([
+    #                 'lsof', '-i', ':5000'
+    #             ], capture_output=True, text=True, timeout=10)
                 
-                debug_results['checks']['process_check'] = {
-                    'command': 'lsof -i :5000',
-                    'return_code': lsof_result.returncode,
-                    'stdout': lsof_result.stdout,
-                    'stderr': lsof_result.stderr
-                }
+    #             debug_results['checks']['process_check'] = {
+    #                 'command': 'lsof -i :5000',
+    #                 'return_code': lsof_result.returncode,
+    #                 'stdout': lsof_result.stdout,
+    #                 'stderr': lsof_result.stderr
+    #             }
                 
-                if lsof_result.returncode == 0 and lsof_result.stdout.strip():
-                    debug_results['checks']['process_check']['analysis'] = {
-                        'processes_found': True,
-                        'process_lines': lsof_result.stdout.strip().split('\n')[1:]  # Skip header
-                    }
-                else:
-                    debug_results['checks']['process_check']['analysis'] = {
-                        'processes_found': False
-                    }
-                    debug_results['recommendations'].append(
-                        "No processes found using port 5000. Check if your UDP service is running."
-                    )
+    #             if lsof_result.returncode == 0 and lsof_result.stdout.strip():
+    #                 debug_results['checks']['process_check']['analysis'] = {
+    #                     'processes_found': True,
+    #                     'process_lines': lsof_result.stdout.strip().split('\n')[1:]  # Skip header
+    #                 }
+    #             else:
+    #                 debug_results['checks']['process_check']['analysis'] = {
+    #                     'processes_found': False
+    #                 }
+    #                 debug_results['recommendations'].append(
+    #                     "No processes found using port 5000. Check if your UDP service is running."
+    #                 )
                     
-            except Exception as e:
-                debug_results['checks']['process_check'] = {
-                    'error': str(e),
-                    'note': 'lsof command not available or failed'
-                }
+    #         except Exception as e:
+    #             debug_results['checks']['process_check'] = {
+    #                 'error': str(e),
+    #                 'note': 'lsof command not available or failed'
+    #             }
             
-            # 7. Generate summary and recommendations
-            debug_results['summary'] = self._analyze_udp_debug_results(debug_results)
+    #         # 7. Generate summary and recommendations
+    #         debug_results['summary'] = self._analyze_udp_debug_results(debug_results)
             
-            return debug_results
+    #         return debug_results
             
-        except Exception as e:
-            return {
-                'error': str(e),
-                'timestamp': self._get_current_time(),
-                'note': 'UDP 5000 debug check failed'
-            }
+    #     except Exception as e:
+    #         return {
+    #             'error': str(e),
+    #             'timestamp': self._get_current_time(),
+    #             'note': 'UDP 5000 debug check failed'
+    #         }
     
-    def _analyze_udp_debug_results(self, debug_results):
-        """Analyze debug results and provide actionable summary"""
-        summary = {
-            'overall_status': 'unknown',
-            'primary_issues': [],
-            'likely_causes': [],
-            'next_steps': []
-        }
+    # def _analyze_udp_debug_results(self, debug_results):
+    #     """Analyze debug results and provide actionable summary"""
+    #     summary = {
+    #         'overall_status': 'unknown',
+    #         'primary_issues': [],
+    #         'likely_causes': [],
+    #         'next_steps': []
+    #     }
         
-        # Analyze port binding
-        port_binding = debug_results['checks'].get('port_binding', {}).get('analysis', {})
-        if port_binding.get('bound') is False:
-            summary['primary_issues'].append('Service not listening on UDP 5000')
-            summary['likely_causes'].append('UDP service not started or misconfigured')
-            summary['next_steps'].append('Start the UDP service and verify it binds to port 5000')
-            summary['overall_status'] = 'service_not_running'
-        elif port_binding.get('public_bind') is False:
-            summary['primary_issues'].append('Service bound to localhost only')
-            summary['likely_causes'].append('Service configured to bind to 127.0.0.1 instead of 0.0.0.0')
-            summary['next_steps'].append('Reconfigure service to bind to 0.0.0.0:5000')
-            summary['overall_status'] = 'localhost_only'
-        elif port_binding.get('bound') is True and port_binding.get('public_bind') is True:
-            # Service is bound correctly, check other issues
-            connectivity_tests = debug_results['checks'].get('connectivity_tests', {})
-            if connectivity_tests.get('external_test', {}).get('success') is False:
-                summary['primary_issues'].append('External connectivity blocked')
-                summary['likely_causes'].append('Firewall or network routing issue')
-                summary['next_steps'].append('Check firewall rules and network configuration')
-                summary['overall_status'] = 'network_blocked'
-            else:
-                summary['overall_status'] = 'likely_working'
+    #     # Analyze port binding
+    #     port_binding = debug_results['checks'].get('port_binding', {}).get('analysis', {})
+    #     if port_binding.get('bound') is False:
+    #         summary['primary_issues'].append('Service not listening on UDP 5000')
+    #         summary['likely_causes'].append('UDP service not started or misconfigured')
+    #         summary['next_steps'].append('Start the UDP service and verify it binds to port 5000')
+    #         summary['overall_status'] = 'service_not_running'
+    #     elif port_binding.get('public_bind') is False:
+    #         summary['primary_issues'].append('Service bound to localhost only')
+    #         summary['likely_causes'].append('Service configured to bind to 127.0.0.1 instead of 0.0.0.0')
+    #         summary['next_steps'].append('Reconfigure service to bind to 0.0.0.0:5000')
+    #         summary['overall_status'] = 'localhost_only'
+    #     elif port_binding.get('bound') is True and port_binding.get('public_bind') is True:
+    #         # Service is bound correctly, check other issues
+    #         connectivity_tests = debug_results['checks'].get('connectivity_tests', {})
+    #         if connectivity_tests.get('external_test', {}).get('success') is False:
+    #             summary['primary_issues'].append('External connectivity blocked')
+    #             summary['likely_causes'].append('Firewall or network routing issue')
+    #             summary['next_steps'].append('Check firewall rules and network configuration')
+    #             summary['overall_status'] = 'network_blocked'
+    #         else:
+    #             summary['overall_status'] = 'likely_working'
         
-        # Check firewall issues
-        firewall_analysis = debug_results['checks'].get('firewall_input', {}).get('analysis', {})
-        if firewall_analysis.get('default_policy') == 'DROP' and not firewall_analysis.get('udp_5000_rules'):
-            summary['primary_issues'].append('Firewall blocking UDP 5000')
-            summary['likely_causes'].append('iptables DROP policy with no UDP 5000 ACCEPT rule')
-            summary['next_steps'].append('Add firewall rule: iptables -A INPUT -p udp --dport 5000 -j ACCEPT')
+    #     # Check firewall issues
+    #     firewall_analysis = debug_results['checks'].get('firewall_input', {}).get('analysis', {})
+    #     if firewall_analysis.get('default_policy') == 'DROP' and not firewall_analysis.get('udp_5000_rules'):
+    #         summary['primary_issues'].append('Firewall blocking UDP 5000')
+    #         summary['likely_causes'].append('iptables DROP policy with no UDP 5000 ACCEPT rule')
+    #         summary['next_steps'].append('Add firewall rule: iptables -A INPUT -p udp --dport 5000 -j ACCEPT')
         
-        return summary
+    #     return summary
     
-    # Add this method to your existing class to get detailed debug info
-    def _get_udp_debug_endpoint(self):
-        """Endpoint to get detailed UDP 5000 debugging information"""
-        try:
-            debug_info = self._debug_udp_5000()
-            return {
-                'operation': 'udp_5000_debug',
-                'success': True,
-                'debug_results': debug_info,
-                'timestamp': self._get_current_time()
-            }
-        except Exception as e:
-            return {
-                'operation': 'udp_5000_debug',
-                'success': False,
-                'error': str(e),
-                'timestamp': self._get_current_time()
-            }
+    # # Add this method to your existing class to get detailed debug info
+    # def _get_udp_debug_endpoint(self):
+    #     """Endpoint to get detailed UDP 5000 debugging information"""
+    #     try:
+    #         debug_info = self._debug_udp_5000()
+    #         return {
+    #             'operation': 'udp_5000_debug',
+    #             'success': True,
+    #             'debug_results': debug_info,
+    #             'timestamp': self._get_current_time()
+    #         }
+    #     except Exception as e:
+    #         return {
+    #             'operation': 'udp_5000_debug',
+    #             'success': False,
+    #             'error': str(e),
+    #             'timestamp': self._get_current_time()
+    #         }
     
     def _get_network_stats(self):
         try:
@@ -1999,31 +2055,31 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     json_response = json.dumps(error_response, indent=2)
                     self.wfile.write(json_response.encode('utf-8'))  
 
-            elif self.path == '/debug/udp5000':
-                try:
-                    debug_data = self._get_udp_debug_endpoint()
+            # elif self.path == '/debug/udp5000':
+            #     try:
+            #         debug_data = self._get_udp_debug_endpoint()
                     
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self._set_cors_headers()
-                    self.end_headers()
+            #         self.send_response(200)
+            #         self.send_header('Content-type', 'application/json')
+            #         self._set_cors_headers()
+            #         self.end_headers()
                     
-                    json_response = json.dumps(debug_data, indent=2)
-                    self.wfile.write(json_response.encode('utf-8'))
+            #         json_response = json.dumps(debug_data, indent=2)
+            #         self.wfile.write(json_response.encode('utf-8'))
                     
-                except Exception as e:
-                    error_response = {
-                        'operation': 'udp_5000_debug',
-                        'success': False,
-                        'error': str(e),
-                        'timestamp': self._get_current_time()
-                    }
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self._set_cors_headers()
-                    self.end_headers()
-                    json_response = json.dumps(error_response, indent=2)
-                    self.wfile.write(json_response.encode('utf-8'))
+            #     except Exception as e:
+            #         error_response = {
+            #             'operation': 'udp_5000_debug',
+            #             'success': False,
+            #             'error': str(e),
+            #             'timestamp': self._get_current_time()
+            #         }
+            #         self.send_response(200)
+            #         self.send_header('Content-type', 'application/json')
+            #         self._set_cors_headers()
+            #         self.end_headers()
+            #         json_response = json.dumps(error_response, indent=2)
+            #         self.wfile.write(json_response.encode('utf-8'))
             
             else:
                 self.send_error(404, "Not Found")
