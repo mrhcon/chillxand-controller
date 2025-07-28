@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.275"
+CHILLXAND_VERSION="v1.0.276"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -376,187 +376,6 @@ setup_service() {
 #     ufw status numbered
 # }
 
-# Fix the check_and_fix_basic_rules function to properly handle IPv6:
-
-check_and_fix_basic_rules() {
-    log "Checking basic rules (IPv4 and IPv6)..."
-    
-    # Check SSH rule
-    if ufw status | grep -q -E "(22/tcp|ssh).*ALLOW.*Anywhere$"; then
-        log "✓ SSH IPv4 rule exists"
-    else
-        log "Adding SSH rule..."
-        ufw allow 22/tcp comment 'SSH access'
-    fi
-    
-    # Check UDP 5000 rule
-    if ufw status | grep -q "5000/udp.*ALLOW.*Anywhere$"; then
-        log "✓ UDP 5000 IPv4 rule exists"
-    else
-        log "Adding UDP 5000 rule..."
-        ufw allow 5000/udp comment 'Pod UDP - Public access'
-    fi
-    
-    # Check localhost-only rules and fix broad rules
-    local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
-    
-    for port_desc in "${local_ports[@]}"; do
-        IFS=':' read -r port desc <<< "$port_desc"
-        
-        # Check for and remove unwanted broad IPv4 rules first
-        if ufw status | grep -q "^${port}/tcp.*ALLOW.*Anywhere$"; then
-            log "⚠️  Removing unwanted IPv4 broad rule for port $port"
-            ufw delete allow "${port}/tcp"
-            log "Removed IPv4 broad allow rule for port $port"
-        fi
-        
-        # Check for and remove unwanted broad IPv6 rules
-        if ufw status | grep -q "^${port}/tcp (v6).*ALLOW.*Anywhere (v6)$"; then
-            log "⚠️  Removing unwanted IPv6 broad rule for port $port"
-            ufw delete allow "${port}/tcp"
-            log "Removed IPv6 broad allow rule for port $port"
-        fi
-        
-        # Now check if localhost rule exists and add if missing
-        if ufw status | grep -q "^${port}.*ALLOW.*127.0.0.1"; then
-            log "✓ Localhost rule for port $port exists"
-        else
-            log "Adding localhost rule for port $port..."
-            ufw allow from 127.0.0.1 to any port "$port" comment "$desc - Local only"
-        fi
-    done
-    
-    # Check 3001 deny rule (should be last)
-    if ufw status | grep -q "^3001.*DENY.*Anywhere$"; then
-        log "✓ 3001 IPv4 deny rule exists"
-    else
-        log "Adding 3001 deny rule..."
-        ufw deny 3001 comment 'Deny all other access to port 3001'
-    fi
-}
-
-# Fix the remove_unwanted_rules function with better detection:
-
-remove_unwanted_rules() {
-    log "Checking for and removing unwanted rules (IPv4 and IPv6)..."
-    
-    # Define ports that should NOT have broad ALLOW rules
-    local protected_ports=("80" "3000" "4000")
-    
-    for port in "${protected_ports[@]}"; do
-        # Check for broad IPv4 TCP rules on protected ports
-        if ufw status | grep -q "^${port}/tcp.*ALLOW.*Anywhere$"; then
-            log "⚠️  Found dangerous IPv4 broad rule for protected port $port"
-            log "Removing dangerous IPv4 broad rule for port $port..."
-            ufw delete allow "${port}/tcp"
-            log "Removed IPv4 broad TCP rule for port $port"
-        fi
-        
-        # Check for broad IPv6 TCP rules on protected ports  
-        if ufw status | grep -q "^${port}/tcp (v6).*ALLOW.*Anywhere (v6)$"; then
-            log "⚠️  Found dangerous IPv6 broad rule for protected port $port"
-            log "Removing dangerous IPv6 broad rule for port $port..."
-            ufw delete allow "${port}/tcp"
-            log "Removed IPv6 broad TCP rule for port $port"
-        fi
-        
-        # Also check for rules without /tcp suffix (IPv4)
-        if ufw status | grep -q "^${port}[[:space:]].*ALLOW.*Anywhere$" && ! ufw status | grep -q "${port}.*127.0.0.1"; then
-            log "⚠️  Found IPv4 broad rule for port $port without localhost restriction"
-            log "Removing IPv4 broad rule for port $port..."
-            ufw delete allow "$port"
-            log "Removed IPv4 broad rule for port $port"
-        fi
-    done
-    
-    # Check for any 3001 rules that allow broader access than our IP list
-    if ufw status | grep -q "^3001/tcp.*ALLOW.*Anywhere$"; then
-        log "⚠️  Found dangerous IPv4 broad rule for port 3001"
-        log "Removing dangerous IPv4 broad rule for port 3001..."
-        ufw delete allow "3001/tcp"
-        log "Removed IPv4 broad TCP rule for port 3001"
-    fi
-    
-    if ufw status | grep -q "^3001/tcp (v6).*ALLOW.*Anywhere (v6)$"; then
-        log "⚠️  Found dangerous IPv6 broad rule for port 3001"
-        log "Removing dangerous IPv6 broad rule for port 3001..."
-        ufw delete allow "3001/tcp"
-        log "Removed IPv6 broad TCP rule for port 3001"
-    fi
-    
-    if ufw status | grep -q "^3001[[:space:]].*ALLOW.*Anywhere$"; then
-        log "⚠️  Found dangerous IPv4 broad rule for port 3001"
-        log "Removing dangerous IPv4 broad rule for port 3001..."
-        ufw delete allow "3001"
-        log "Removed IPv4 broad rule for port 3001"
-    fi
-}
-
-# The key fix: Make sure the script ALWAYS checks for unwanted rules
-# Modify the main setup_firewall logic to be more thorough:
-
-setup_firewall() {
-    log "Configuring UFW firewall with incremental rule management..."
-    
-    # UFW should be installed by install_dependencies(), but double-check
-    if ! command -v ufw &> /dev/null; then
-        error "UFW is not available after installation attempt. This is unexpected."
-        error "Firewall configuration cannot proceed without UFW."
-        return 1
-    fi
-    
-    # Ensure UFW is enabled with proper defaults
-    setup_ufw_basics
-    
-    # Define IP-specific 3001 rules
-    declare -A WANTED_3001_IPS
-    for ip in "${!ALLOWED_IPS[@]}"; do
-        if [[ "$ip" != "127.0.0.1" ]]; then
-            WANTED_3001_IPS["$ip"]="${ALLOWED_IPS[$ip]}"
-        fi
-    done
-    
-    log "Analyzing current UFW configuration..."
-    
-    # Always check for configuration issues regardless of what looks "correct"
-    local needs_changes=false
-    
-    # Check if we have unwanted broad rules (this should trigger cleanup)
-    for port in 80 3000 4000; do
-        if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere"; then
-            log "Found unwanted broad rule for port $port - cleanup needed"
-            needs_changes=true
-        fi
-        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
-            log "Found unwanted IPv6 broad rule for port $port - cleanup needed"
-            needs_changes=true
-        fi
-    done
-    
-    # Check if localhost rules are missing
-    for port in 80 3000 4000; do
-        if ! ufw status | grep -q "${port}.*ALLOW.*127.0.0.1"; then
-            log "Missing localhost rule for port $port - setup needed"
-            needs_changes=true
-        fi
-    done
-    
-    # Always run the checks and fixes (don't skip based on assumptions)
-    log "Running comprehensive firewall configuration check..."
-    
-    # Step 1: Check and fix basic rules
-    check_and_fix_basic_rules
-    
-    # Step 2: Check and fix 3001 IP-specific rules  
-    check_and_fix_3001_rules
-    
-    # Step 3: Remove any unwanted rules (this should always run)
-    remove_unwanted_rules
-    
-    # Step 4: Show final status
-    show_final_status
-}
-
 setup_ufw_basics() {
     local ufw_status=$(ufw status | head -1)
     
@@ -581,11 +400,77 @@ setup_ufw_basics() {
     fi
 }
 
+check_and_fix_basic_rules() {
+    log "Checking basic rules (IPv4 and IPv6)..."
+    
+    # Check SSH rule
+    if ufw status | grep -q "22/tcp.*ALLOW.*Anywhere"; then
+        log "✓ SSH rule exists"
+    else
+        log "Adding SSH rule..."
+        ufw allow 22/tcp comment 'SSH access'
+    fi
+    
+    # Check UDP 5000 rule
+    if ufw status | grep -q "5000/udp.*ALLOW.*Anywhere"; then
+        log "✓ UDP 5000 rule exists"
+    else
+        log "Adding UDP 5000 rule..."
+        ufw allow 5000/udp comment 'Pod UDP - Public access'
+    fi
+    
+    # Check localhost-only rules and fix broad rules
+    local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
+    
+    for port_desc in "${local_ports[@]}"; do
+        IFS=':' read -r port desc <<< "$port_desc"
+        
+        # Check for and remove unwanted broad IPv4 rules first
+        # Pattern: port/tcp + spaces + ALLOW + spaces + Anywhere + optional spaces/comments
+        if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+            log "⚠️  Removing unwanted IPv4 broad rule for port $port"
+            ufw delete allow "${port}/tcp"
+            log "Removed IPv4 broad allow rule for port $port"
+        fi
+        
+        # Check for and remove unwanted broad IPv6 rules
+        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+            log "⚠️  Removing unwanted IPv6 broad rule for port $port"
+            ufw delete allow "${port}/tcp"
+            log "Removed IPv6 broad allow rule for port $port"
+        fi
+        
+        # Now check if localhost rule exists and add if missing
+        if ufw status | grep -q "${port}.*ALLOW.*127.0.0.1"; then
+            log "✓ Localhost rule for port $port exists"
+        else
+            log "Adding localhost rule for port $port..."
+            ufw allow from 127.0.0.1 to any port "$port" comment "$desc - Local only"
+        fi
+    done
+    
+    # Check 3001 deny rule (should be last)
+    if ufw status | grep -q "3001.*DENY.*Anywhere"; then
+        log "✓ 3001 deny rule exists"
+    else
+        log "Adding 3001 deny rule..."
+        ufw deny 3001 comment 'Deny all other access to port 3001'
+    fi
+}
+
 check_and_fix_3001_rules() {
     log "Checking 3001 IP-specific rules..."
     
-    # Get current 3001 ALLOW rules
-    local current_3001_rules=$(ufw status | grep "3001.*ALLOW" | grep -v "127.0.0.1")
+    # Define IP-specific 3001 rules
+    declare -A WANTED_3001_IPS
+    for ip in "${!ALLOWED_IPS[@]}"; do
+        if [[ "$ip" != "127.0.0.1" ]]; then
+            WANTED_3001_IPS["$ip"]="${ALLOWED_IPS[$ip]}"
+        fi
+    done
+    
+    # Get current 3001 ALLOW rules (exclude comment lines)
+    local current_3001_rules=$(ufw status | grep "3001.*ALLOW" | grep -v "127.0.0.1" | grep -v "^#")
     
     # Check each IP we want
     for ip in "${!WANTED_3001_IPS[@]}"; do
@@ -601,12 +486,12 @@ check_and_fix_3001_rules() {
     
     # Check for any 3001 rules that shouldn't exist
     while IFS= read -r rule_line; do
-        if [[ -n "$rule_line" ]]; then
-            # Extract IP from rule line
-            local rule_ip=$(echo "$rule_line" | awk '{print $4}')
+        if [[ -n "$rule_line" && ! "$rule_line" =~ ^[[:space:]]*# ]]; then
+            # Extract IP from rule line - handle the actual UFW format
+            local rule_ip=$(echo "$rule_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
             
             # Check if this IP is in our wanted list
-            if [[ -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
+            if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
                 log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
                 log "Removing unwanted 3001 rule for $rule_ip..."
                 
@@ -621,9 +506,49 @@ check_and_fix_3001_rules() {
     done <<< "$current_3001_rules"
 }
 
+remove_unwanted_rules() {
+    log "Checking for and removing unwanted rules (IPv4 and IPv6)..."
+    
+    # Define ports that should NOT have broad ALLOW rules
+    local protected_ports=("80" "3000" "4000")
+    
+    for port in "${protected_ports[@]}"; do
+        # Check for broad IPv4 TCP rules on protected ports
+        # Use grep -v to exclude IPv6 lines when checking IPv4
+        if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+            log "⚠️  Found dangerous IPv4 broad rule for protected port $port"
+            log "Removing dangerous IPv4 broad rule for port $port..."
+            ufw delete allow "${port}/tcp"
+            log "Removed IPv4 broad TCP rule for port $port"
+        fi
+        
+        # Check for broad IPv6 TCP rules on protected ports  
+        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+            log "⚠️  Found dangerous IPv6 broad rule for protected port $port"
+            log "Removing dangerous IPv6 broad rule for port $port..."
+            ufw delete allow "${port}/tcp"
+            log "Removed IPv6 broad TCP rule for port $port"
+        fi
+    done
+    
+    # Check for any 3001 rules that allow broader access than our IP list
+    if ufw status | grep "3001/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+        log "⚠️  Found dangerous IPv4 broad rule for port 3001"
+        log "Removing dangerous IPv4 broad rule for port 3001..."
+        ufw delete allow "3001/tcp"
+        log "Removed IPv4 broad TCP rule for port 3001"
+    fi
+    
+    if ufw status | grep -q "3001/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+        log "⚠️  Found dangerous IPv6 broad rule for port 3001"
+        log "Removing dangerous IPv6 broad rule for port 3001..."
+        ufw delete allow "3001/tcp"
+        log "Removed IPv6 broad TCP rule for port 3001"
+    fi
+}
 
 show_final_status() {
-    log "UFW incremental configuration complete. Final status:"
+    log "UFW configuration complete. Final status:"
     ufw status numbered
     
     # Verification summary
@@ -638,13 +563,13 @@ show_final_status() {
     local ip_3001_rules=$(ufw status | grep -c "3001.*ALLOW" || echo "0")
     local deny_3001=$(ufw status | grep -c "3001.*DENY.*Anywhere" || echo "0")
     
-    echo "✅ SSH (22/tcp): $ssh_rules rule(s) - $([ $ssh_rules -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ UDP 5000: $udp_rules rule(s) - $([ $udp_rules -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ HTTP (80): $local_80 localhost rule(s) - $([ $local_80 -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ Next.js (3000): $local_3000 localhost rule(s) - $([ $local_3000 -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ Node.js (4000): $local_4000 localhost rule(s) - $([ $local_4000 -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ 3001 IP rules: $ip_3001_rules rule(s) - $([ $ip_3001_rules -eq ${#WANTED_3001_IPS[@]} ] && echo "✓ Correct" || echo "✗ Issue")"
-    echo "✅ 3001 deny: $deny_3001 rule(s) - $([ $deny_3001 -eq 1 ] && echo "✓ Correct" || echo "✗ Issue")"
+    echo "✅ SSH (22/tcp): $ssh_rules rule(s)"
+    echo "✅ UDP 5000: $udp_rules rule(s)"
+    echo "✅ HTTP (80): $local_80 localhost rule(s)"
+    echo "✅ Next.js (3000): $local_3000 localhost rule(s)"
+    echo "✅ Node.js (4000): $local_4000 localhost rule(s)"
+    echo "✅ 3001 IP rules: $ip_3001_rules rule(s) - Expected: $((${#ALLOWED_IPS[@]} - 1))"
+    echo "✅ 3001 deny: $deny_3001 rule(s)"
     
     local total_rules=$(ufw status numbered | grep -c "^\[")
     log "Total UFW rules: $total_rules"
@@ -652,8 +577,15 @@ show_final_status() {
     # Check for any broad rules on protected ports
     local security_issues=0
     for port in 80 3000 4000; do
-        if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere"; then
-            echo "⚠️  SECURITY ISSUE: Port $port has broad access (should be localhost only)"
+        # Check for IPv4 broad rules
+        if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
+            echo "⚠️  SECURITY ISSUE: Port $port has IPv4 broad access (should be localhost only)"
+            security_issues=$((security_issues + 1))
+        fi
+        
+        # Check for IPv6 broad rules
+        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+            echo "⚠️  SECURITY ISSUE: Port $port has IPv6 broad access (should be localhost only)"
             security_issues=$((security_issues + 1))
         fi
     done
@@ -664,7 +596,28 @@ show_final_status() {
         warn "$security_issues security issue(s) detected and noted above"
     fi
     
-    log "Incremental UFW configuration completed successfully"
+    log "UFW configuration completed successfully"
+}
+
+setup_firewall() {
+    log "Configuring UFW firewall with incremental rule management..."
+    
+    # UFW should be available
+    if ! command -v ufw &> /dev/null; then
+        error "UFW is not available. Please install UFW first."
+        exit 1
+    fi
+    
+    # Ensure UFW is enabled with proper defaults
+    setup_ufw_basics
+    
+    log "Checking and fixing UFW configuration..."
+    
+    # Just do the work - check and fix in one pass
+    check_and_fix_basic_rules
+    check_and_fix_3001_rules  
+    remove_unwanted_rules
+    show_final_status
 }
 
 # Test the installation
