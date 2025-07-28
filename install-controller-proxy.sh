@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.272"
+CHILLXAND_VERSION="v1.0.274"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -492,8 +492,9 @@ remove_unwanted_rules() {
     # Define ports that should NOT have broad ALLOW rules
     local protected_ports=("80" "3000" "4000")
     
+    # First pass: Remove IPv4 broad rules
     for port in "${protected_ports[@]}"; do
-        # Check for broad IPv4 TCP rules on protected ports
+        # Check for broad IPv4 TCP rules
         if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere$"; then
             log "⚠️  Found dangerous IPv4 broad rule for protected port $port"
             log "Removing dangerous IPv4 broad rule for port $port..."
@@ -501,15 +502,7 @@ remove_unwanted_rules() {
             log "Removed IPv4 broad TCP rule for port $port"
         fi
         
-        # Check for broad IPv6 TCP rules on protected ports  
-        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
-            log "⚠️  Found dangerous IPv6 broad rule for protected port $port"
-            log "Removing dangerous IPv6 broad rule for port $port..."
-            ufw delete allow "${port}/tcp"  # This removes both IPv4 and IPv6
-            log "Removed IPv6 broad TCP rule for port $port"
-        fi
-        
-        # Also check for rules without /tcp suffix (IPv4)
+        # Check for rules without /tcp suffix (IPv4)
         if ufw status | grep -q "^${port}[[:space:]].*ALLOW.*Anywhere$" && ! ufw status | grep -q "${port}.*127.0.0.1"; then
             log "⚠️  Found IPv4 broad rule for port $port without localhost restriction"
             log "Removing IPv4 broad rule for port $port..."
@@ -518,7 +511,67 @@ remove_unwanted_rules() {
         fi
     done
     
-    # Check for any 3001 rules that allow broader access than our IP list
+    # Second pass: Remove IPv6 broad rules using a more robust approach
+    log "Scanning for IPv6 broad rules to remove..."
+    
+    # Get all IPv6 rules that match our protected ports
+    local ipv6_rules_to_remove=()
+    
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            # Extract the port number from IPv6 rules
+            local port_from_rule=$(echo "$line" | grep -o '^[0-9]*' | head -1)
+            
+            # Check if this port is in our protected ports list
+            for protected_port in "${protected_ports[@]}"; do
+                if [[ "$port_from_rule" == "$protected_port" ]] && [[ "$line" == *"(v6)"* ]] && [[ "$line" == *"ALLOW"* ]] && [[ "$line" == *"Anywhere (v6)"* ]]; then
+                    log "⚠️  Found IPv6 broad rule to remove: $line"
+                    ipv6_rules_to_remove+=("$line")
+                fi
+            done
+        fi
+    done <<< "$(ufw status | grep '/tcp (v6).*ALLOW.*Anywhere (v6)')"
+    
+    # Remove the IPv6 rules we found
+    for rule_line in "${ipv6_rules_to_remove[@]}"; do
+        local port=$(echo "$rule_line" | grep -o '^[0-9]*')
+        log "Removing IPv6 broad rule for port $port..."
+        
+        # Try multiple deletion methods
+        local deletion_success=false
+        
+        # Method 1: Standard deletion
+        if ufw delete allow "${port}/tcp" 2>/dev/null; then
+            log "✓ Removed IPv6 rule for port $port (method 1)"
+            deletion_success=true
+        # Method 2: Try with numbered deletion
+        elif [[ "$deletion_success" == "false" ]]; then
+            local rule_num=$(ufw status numbered | grep "${port}/tcp (v6)" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
+            if [[ -n "$rule_num" ]]; then
+                log "Trying numbered deletion for IPv6 rule $rule_num..."
+                if ufw --force delete "$rule_num" 2>/dev/null; then
+                    log "✓ Removed IPv6 rule for port $port (method 2)"
+                    deletion_success=true
+                fi
+            fi
+        fi
+        
+        # Method 3: Manual rule specification
+        if [[ "$deletion_success" == "false" ]]; then
+            log "Trying manual rule specification for port $port..."
+            if ufw delete allow in on any to any port "$port" proto tcp 2>/dev/null; then
+                log "✓ Removed IPv6 rule for port $port (method 3)"
+                deletion_success=true
+            fi
+        fi
+        
+        if [[ "$deletion_success" == "false" ]]; then
+            warn "⚠️  Failed to automatically remove IPv6 rule for port $port"
+            warn "You may need to manually remove: $rule_line"
+        fi
+    done
+    
+    # Third pass: Check for any 3001 rules that allow broader access than our IP list
     if ufw status | grep -q "3001/tcp.*ALLOW.*Anywhere$"; then
         log "⚠️  Found dangerous IPv4 broad rule for port 3001"
         log "Removing dangerous IPv4 broad rule for port 3001..."
@@ -540,31 +593,21 @@ remove_unwanted_rules() {
         log "Removed IPv4 broad rule for port 3001"
     fi
     
-    # Additional cleanup: Look for any other suspicious broad IPv6 rules on protected ports
-    log "Scanning for additional unwanted IPv6 rules on protected ports..."
-    
+    # Final verification
+    log "Verifying IPv6 cleanup..."
+    local remaining_ipv6_issues=0
     for port in "${protected_ports[@]}"; do
-        # Check specifically for the (v6) pattern
-        local ipv6_rule_found=$(ufw status | grep "${port}/tcp (v6).*ALLOW.*Anywhere (v6)" || true)
-        if [[ -n "$ipv6_rule_found" ]]; then
-            log "⚠️  Found unwanted IPv6 rule: $ipv6_rule_found"
-            log "Removing unwanted IPv6 rule for port $port..."
-            
-            # Try different deletion approaches for IPv6
-            if ufw delete allow "${port}/tcp"; then
-                log "Successfully removed IPv6 rule for port $port"
-            else
-                warn "Failed to remove IPv6 rule for port $port with standard method"
-                # Try alternative method
-                local rule_num=$(ufw status numbered | grep "${port}/tcp (v6)" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
-                if [[ -n "$rule_num" ]]; then
-                    log "Trying to remove by rule number: $rule_num"
-                    ufw --force delete "$rule_num"
-                    log "Removed IPv6 rule for port $port by rule number"
-                fi
-            fi
+        if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
+            warn "⚠️  IPv6 broad rule for port $port still exists after cleanup attempt"
+            remaining_ipv6_issues=$((remaining_ipv6_issues + 1))
         fi
     done
+    
+    if [[ $remaining_ipv6_issues -eq 0 ]]; then
+        log "✓ All unwanted IPv6 broad rules successfully removed"
+    else
+        warn "⚠️  $remaining_ipv6_issues unwanted IPv6 rules remain - may need manual cleanup"
+    fi
 }
 
 # Enhanced check function that also validates IPv6 cleanup
