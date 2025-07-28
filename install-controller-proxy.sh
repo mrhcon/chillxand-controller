@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.265"
+CHILLXAND_VERSION="v1.0.266"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -291,17 +291,102 @@ setup_service() {
     fi
 }
 
+# setup_firewall() {
+#     log "Configuring UFW firewall with IP restrictions..."
+    
+#     # Check if UFW is installed and available
+#     if ! command -v ufw &> /dev/null; then
+#         warn "UFW is not installed or not available. Skipping firewall configuration."
+#         warn "Port 3001 may not be accessible from outside without manual firewall configuration."
+#         return
+#     fi
+    
+#     # Check if UFW is enabled
+#     ufw_status=$(ufw status | head -1)
+#     if [[ "$ufw_status" == *"inactive"* ]]; then
+#         log "UFW is inactive, will configure and enable..."
+#         needs_setup=true
+#     else
+#         log "UFW is active, checking existing rules..."
+#         needs_setup=false
+        
+#         # Check if all required rules exist
+#         for ip in "${!ALLOWED_IPS[@]}"; do
+#             if [[ "$ip" != "127.0.0.1" ]] && ! ufw status | grep -q "3001.*$ip"; then
+#                 log "Missing rule for $ip (${ALLOWED_IPS[$ip]})"
+#                 needs_setup=true
+#                 break
+#             fi
+#         done
+        
+#         # Check if deny rule exists for port 3001
+#         if ! ufw status | grep -q "3001.*DENY"; then
+#             log "Missing deny rule for port 3001"
+#             needs_setup=true
+#         fi
+        
+#         # Check if SSH is allowed
+#         if ! ufw status | grep -q -E "(22|ssh).*ALLOW"; then
+#             log "Missing SSH rule"
+#             needs_setup=true
+#         fi
+#     fi
+    
+#     if [[ "$needs_setup" == "false" ]]; then
+#         log "All required UFW rules already exist, skipping firewall configuration"
+#         return
+#     fi
+    
+#     log "UFW configuration needed, proceeding with setup..."
+    
+#     # Only reset if we really need to reconfigure
+#     log "Resetting UFW rules..."
+#     ufw --force reset
+    
+#     # Set default policies
+#     log "Setting default UFW policies..."
+#     ufw default deny incoming
+#     ufw default allow outgoing
+    
+#     # Allow SSH (important - don't lock yourself out!)
+#     log "Allowing SSH access..."
+#     ufw allow ssh
+    
+#     # Allow the specific IPs to access port 3001
+#     log "Adding IP whitelist rules for port 3001..."
+    
+#     for ip in "${!ALLOWED_IPS[@]}"; do
+#         # Skip localhost for UFW rules (it's allowed by default)
+#         if [[ "$ip" != "127.0.0.1" ]]; then
+#             ufw allow from "$ip" to any port 3001 comment "${ALLOWED_IPS[$ip]}"
+#             log "Added rule for $ip (${ALLOWED_IPS[$ip]})"
+#         fi
+#     done
+    
+#     # Explicitly deny all other access to port 3001
+#     ufw deny 3001 comment 'Deny all other access to port 3001'
+#     log "Added deny rule for all other IPs on port 3001"
+    
+#     # Enable UFW
+#     log "Enabling UFW firewall..."
+#     ufw --force enable
+    
+#     # Show the status
+#     log "UFW firewall configuration complete. Current rules:"
+#     ufw status numbered
+# }
+
 setup_firewall() {
-    log "Configuring UFW firewall with IP restrictions..."
+    log "Configuring UFW firewall with complete port restrictions..."
     
     # Check if UFW is installed and available
     if ! command -v ufw &> /dev/null; then
         warn "UFW is not installed or not available. Skipping firewall configuration."
-        warn "Port 3001 may not be accessible from outside without manual firewall configuration."
+        warn "Ports may not be properly restricted without manual firewall configuration."
         return
     fi
     
-    # Check if UFW is enabled
+    # Check if UFW configuration is needed
     ufw_status=$(ufw status | head -1)
     if [[ "$ufw_status" == *"inactive"* ]]; then
         log "UFW is inactive, will configure and enable..."
@@ -310,10 +395,20 @@ setup_firewall() {
         log "UFW is active, checking existing rules..."
         needs_setup=false
         
-        # Check if all required rules exist
+        # Check if all required port rules exist
+        required_ports=("22/tcp" "3000/tcp" "4000/tcp" "5000/udp")
+        for port in "${required_ports[@]}"; do
+            if ! ufw status | grep -q "$port.*ALLOW.*Anywhere"; then
+                log "Missing rule for $port"
+                needs_setup=true
+                break
+            fi
+        done
+        
+        # Check if 3001 IP-specific rules exist
         for ip in "${!ALLOWED_IPS[@]}"; do
             if [[ "$ip" != "127.0.0.1" ]] && ! ufw status | grep -q "3001.*$ip"; then
-                log "Missing rule for $ip (${ALLOWED_IPS[$ip]})"
+                log "Missing 3001 rule for $ip (${ALLOWED_IPS[$ip]})"
                 needs_setup=true
                 break
             fi
@@ -324,12 +419,6 @@ setup_firewall() {
             log "Missing deny rule for port 3001"
             needs_setup=true
         fi
-        
-        # Check if SSH is allowed
-        if ! ufw status | grep -q -E "(22|ssh).*ALLOW"; then
-            log "Missing SSH rule"
-            needs_setup=true
-        fi
     fi
     
     if [[ "$needs_setup" == "false" ]]; then
@@ -337,29 +426,37 @@ setup_firewall() {
         return
     fi
     
-    log "UFW configuration needed, proceeding with setup..."
+    log "UFW configuration needed, proceeding with complete setup..."
     
-    # Only reset if we really need to reconfigure
+    # Reset UFW to clean state
     log "Resetting UFW rules..."
     ufw --force reset
     
-    # Set default policies
-    log "Setting default UFW policies..."
+    # Set strict default policies
+    log "Setting strict default UFW policies..."
     ufw default deny incoming
     ufw default allow outgoing
     
-    # Allow SSH (important - don't lock yourself out!)
-    log "Allowing SSH access..."
-    ufw allow ssh
+    # Allow SSH access from anywhere (critical - don't lock yourself out!)
+    log "Allowing SSH access from anywhere..."
+    ufw allow 22/tcp
     
-    # Allow the specific IPs to access port 3001
+    # Allow your application ports from anywhere
+    log "Allowing application ports from anywhere..."
+    # ufw allow 3000/tcp
+    # ufw allow 4000/tcp
+    ufw allow from 127.0.0.1 to any port 80 comment 'Local access only'
+    ufw allow from 127.0.0.1 to any port 3000 comment 'Local access only'
+    ufw allow from 127.0.0.1 to any port 4000 comment 'Local access only'    
+    ufw allow 5000/udp
+    
+    # Allow port 3001 only from specific IPs
     log "Adding IP whitelist rules for port 3001..."
-    
     for ip in "${!ALLOWED_IPS[@]}"; do
         # Skip localhost for UFW rules (it's allowed by default)
         if [[ "$ip" != "127.0.0.1" ]]; then
             ufw allow from "$ip" to any port 3001 comment "${ALLOWED_IPS[$ip]}"
-            log "Added rule for $ip (${ALLOWED_IPS[$ip]})"
+            log "Added 3001 rule for $ip (${ALLOWED_IPS[$ip]})"
         fi
     done
     
@@ -371,9 +468,58 @@ setup_firewall() {
     log "Enabling UFW firewall..."
     ufw --force enable
     
-    # Show the status
+    # Show the final configuration
     log "UFW firewall configuration complete. Current rules:"
     ufw status numbered
+    
+    # Verify the configuration matches expectations
+    log "Verifying firewall configuration..."
+    
+    # Count expected rules (4 ports + IP-specific 3001 rules + deny rule + IPv6 equivalents)
+    expected_ipv4_rules=$((4 + ${#ALLOWED_IPS[@]} - 1 + 1))  # -1 for localhost, +1 for deny
+    expected_ipv6_rules=5  # 4 ports + deny rule for 3001
+    
+    actual_rules=$(ufw status numbered | grep -c "^\[")
+    log "Total firewall rules created: $actual_rules"
+    
+    # Test that the rules are working
+    log "Testing firewall rule accessibility..."
+    
+    # Test that SSH is allowed
+    if ufw status | grep -q "22/tcp.*ALLOW.*Anywhere"; then
+        log "✓ SSH (port 22) allowed from anywhere"
+    else
+        warn "✗ SSH (port 22) rule not found - this could lock you out!"
+    fi
+    
+    # Test application ports
+    # for port in "3000/tcp" "4000/tcp" "5000/udp"; do
+    for port in "5000/udp"; do    
+        if ufw status | grep -q "$port.*ALLOW.*Anywhere"; then
+            log "✓ Port $port allowed from anywhere"
+        else
+            warn "✗ Port $port rule not found"
+        fi
+    done
+    
+    # Test 3001 IP restrictions
+    allowed_3001_count=$(ufw status | grep -c "3001.*ALLOW")
+    expected_3001_count=$((${#ALLOWED_IPS[@]} - 1))  # -1 for localhost
+    
+    if [[ $allowed_3001_count -eq $expected_3001_count ]]; then
+        log "✓ Port 3001 IP restrictions configured correctly ($allowed_3001_count rules)"
+    else
+        warn "✗ Port 3001 IP restrictions mismatch (expected: $expected_3001_count, found: $allowed_3001_count)"
+    fi
+    
+    # Test 3001 deny rule
+    if ufw status | grep -q "3001.*DENY.*Anywhere"; then
+        log "✓ Port 3001 deny rule configured correctly"
+    else
+        warn "✗ Port 3001 deny rule not found"
+    fi
+    
+    log "Firewall configuration verification complete"
 }
 
 # Test the installation
