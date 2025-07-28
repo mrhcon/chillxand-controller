@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.269"
+CHILLXAND_VERSION="v1.0.271"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -446,59 +446,6 @@ setup_ufw_basics() {
     fi
 }
 
-check_and_fix_basic_rules() {
-    log "Checking basic rules..."
-    
-    # Check SSH rule
-    if ufw status | grep -q -E "(22/tcp|ssh).*ALLOW.*Anywhere"; then
-        log "✓ SSH rule exists"
-    else
-        log "Adding SSH rule..."
-        ufw allow 22/tcp comment 'SSH access'
-    fi
-    
-    # Check UDP 5000 rule
-    if ufw status | grep -q "5000/udp.*ALLOW.*Anywhere"; then
-        log "✓ UDP 5000 rule exists"
-    else
-        log "Adding UDP 5000 rule..."
-        ufw allow 5000/udp comment 'Pod UDP - Public access'
-    fi
-    
-    # Check localhost-only rules
-    local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
-    
-    for port_desc in "${local_ports[@]}"; do
-        IFS=':' read -r port desc <<< "$port_desc"
-        
-        if ufw status | grep -q "${port}.*ALLOW.*127.0.0.1"; then
-            log "✓ Localhost rule for port $port exists"
-        else
-            log "Adding localhost rule for port $port..."
-            ufw allow from 127.0.0.1 to any port "$port" comment "$desc - Local only"
-        fi
-        
-        # Check if there's an unwanted broad rule for this port
-        if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere"; then
-            log "⚠️  Removing unwanted broad rule for port $port (should be localhost only)"
-            # Get the rule number and delete it
-            local rule_num=$(ufw status numbered | grep "${port}/tcp.*ALLOW.*Anywhere" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
-            if [[ -n "$rule_num" ]]; then
-                ufw --force delete "$rule_num"
-                log "Removed broad allow rule for port $port"
-            fi
-        fi
-    done
-    
-    # Check 3001 deny rule (should be last)
-    if ufw status | grep -q "3001.*DENY.*Anywhere"; then
-        log "✓ 3001 deny rule exists"
-    else
-        log "Adding 3001 deny rule..."
-        ufw deny 3001 comment 'Deny all other access to port 3001'
-    fi
-}
-
 check_and_fix_3001_rules() {
     log "Checking 3001 IP-specific rules..."
     
@@ -539,6 +486,58 @@ check_and_fix_3001_rules() {
     done <<< "$current_3001_rules"
 }
 
+check_and_fix_basic_rules() {
+    log "Checking basic rules..."
+    
+    # Check SSH rule
+    if ufw status | grep -q -E "(22/tcp|ssh).*ALLOW.*Anywhere"; then
+        log "✓ SSH rule exists"
+    else
+        log "Adding SSH rule..."
+        ufw allow 22/tcp comment 'SSH access'
+    fi
+    
+    # Check UDP 5000 rule
+    if ufw status | grep -q "5000/udp.*ALLOW.*Anywhere"; then
+        log "✓ UDP 5000 rule exists"
+    else
+        log "Adding UDP 5000 rule..."
+        ufw allow 5000/udp comment 'Pod UDP - Public access'
+    fi
+    
+    # Check localhost-only rules and fix broad rules
+    local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
+    
+    for port_desc in "${local_ports[@]}"; do
+        IFS=':' read -r port desc <<< "$port_desc"
+        
+        # Check if there's an unwanted broad rule for this port (REMOVE FIRST)
+        if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere"; then
+            log "⚠️  Removing unwanted broad rule for port $port (should be localhost only)"
+            
+            # Delete using the rule specification, not rule number (more reliable)
+            ufw delete allow "${port}/tcp"
+            log "Removed broad allow rule for port $port"
+        fi
+        
+        # Now check if localhost rule exists and add if missing
+        if ufw status | grep -q "${port}.*ALLOW.*127.0.0.1"; then
+            log "✓ Localhost rule for port $port exists"
+        else
+            log "Adding localhost rule for port $port..."
+            ufw allow from 127.0.0.1 to any port "$port" comment "$desc - Local only"
+        fi
+    done
+    
+    # Check 3001 deny rule (should be last)
+    if ufw status | grep -q "3001.*DENY.*Anywhere"; then
+        log "✓ 3001 deny rule exists"
+    else
+        log "Adding 3001 deny rule..."
+        ufw deny 3001 comment 'Deny all other access to port 3001'
+    fi
+}
+
 remove_unwanted_rules() {
     log "Checking for and removing unwanted rules..."
     
@@ -549,53 +548,34 @@ remove_unwanted_rules() {
         # Check for broad TCP rules on protected ports
         if ufw status | grep -q "${port}/tcp.*ALLOW.*Anywhere"; then
             log "⚠️  Found dangerous broad rule for protected port $port"
-            
-            # Get all rule numbers for this pattern
-            while IFS= read -r rule_line; do
-                if [[ -n "$rule_line" ]]; then
-                    local rule_num=$(echo "$rule_line" | grep -o '^\[[0-9]*\]' | tr -d '[]')
-                    if [[ -n "$rule_num" ]]; then
-                        log "Removing dangerous broad rule #$rule_num for port $port..."
-                        ufw --force delete "$rule_num"
-                    fi
-                fi
-            done <<< "$(ufw status numbered | grep "${port}/tcp.*ALLOW.*Anywhere")"
+            log "Removing dangerous broad rule for port $port..."
+            ufw delete allow "${port}/tcp"
+            log "Removed broad TCP rule for port $port"
+        fi
+        
+        # Also check for rules without /tcp suffix
+        if ufw status | grep -q "^${port}[[:space:]].*ALLOW.*Anywhere" && ! ufw status | grep -q "${port}.*127.0.0.1"; then
+            log "⚠️  Found broad rule for port $port without localhost restriction"
+            log "Removing broad rule for port $port..."
+            ufw delete allow "$port"
+            log "Removed broad rule for port $port"
         fi
     done
     
     # Check for any 3001 rules that allow broader access than our IP list
     if ufw status | grep -q "3001/tcp.*ALLOW.*Anywhere"; then
         log "⚠️  Found dangerous broad rule for port 3001"
-        local rule_num=$(ufw status numbered | grep "3001/tcp.*ALLOW.*Anywhere" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
-        if [[ -n "$rule_num" ]]; then
-            log "Removing dangerous broad rule for port 3001..."
-            ufw --force delete "$rule_num"
-        fi
+        log "Removing dangerous broad rule for port 3001..."
+        ufw delete allow "3001/tcp"
+        log "Removed broad TCP rule for port 3001"
     fi
     
-    # Look for any other suspicious broad rules on unusual ports
-    local allowed_broad_ports=("22" "5000")
-    
-    while IFS= read -r rule_line; do
-        if [[ -n "$rule_line" && "$rule_line" == *"ALLOW"*"Anywhere"* ]]; then
-            local port=$(echo "$rule_line" | awk '{print $2}' | cut -d'/' -f1)
-            
-            # Check if this port is in our allowed list
-            local port_allowed=false
-            for allowed_port in "${allowed_broad_ports[@]}"; do
-                if [[ "$port" == "$allowed_port" ]]; then
-                    port_allowed=true
-                    break
-                fi
-            done
-            
-            if [[ "$port_allowed" == "false" ]]; then
-                log "⚠️  Found unexpected broad rule for port $port"
-                log "Rule: $rule_line"
-                log "This may need manual review - not auto-removing unknown broad rules"
-            fi
-        fi
-    done <<< "$(ufw status | grep 'ALLOW.*Anywhere' | grep -v -E '(22|5000)')"
+    if ufw status | grep -q "^3001[[:space:]].*ALLOW.*Anywhere"; then
+        log "⚠️  Found dangerous broad rule for port 3001"
+        log "Removing dangerous broad rule for port 3001..."
+        ufw delete allow "3001"
+        log "Removed broad rule for port 3001"
+    fi
 }
 
 show_final_status() {
