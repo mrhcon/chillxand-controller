@@ -527,8 +527,28 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
                 'upstream_error': str(e)
             }
+
+        # Add xandminer version
+        upstream_versions['xandminer'] = self._get_xandminer_version()
         
         return upstream_versions
+
+    def _get_xandminer_version(self):
+        """Extract version from xandminer CONSTS.ts file"""
+        try:
+            consts_file = '/root/xandminer/src/CONSTS.ts'
+            if os.path.exists(consts_file):
+                result = subprocess.run(
+                    ['sed', '-n', 's/.*VERSION_NO = "\\([^"]*\\)".*/\\1/p', consts_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            return 'unknown'
+        except Exception:
+            return 'unknown'
     
     def _get_summary_data(self):
         summary = {
