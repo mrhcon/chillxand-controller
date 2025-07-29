@@ -508,28 +508,30 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     # If there's a nested data structure, add to it
                     if 'data' in upstream_versions and isinstance(upstream_versions['data'], dict):
                         upstream_versions['data']['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                        upstream_versions['data']['xandminer'] = self._get_xandminer_version()
                     else:
                         # Add directly to the main object
                         upstream_versions['chillxand_controller'] = CHILLXAND_CONTROLLER_VERSION
+                        upstream_versions['xandminer'] = self._get_xandminer_version()
                 else:
                     # If upstream returned something unexpected, create our own structure
                     upstream_versions = {
                         'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                        'xandminer': self._get_xandminer_version(),
                         'upstream_data': upstream_versions
                     }
             else:
                 upstream_versions = {
                     'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                    'xandminer': self._get_xandminer_version(),
                     'upstream_error': f'HTTP {response.status_code}'
                 }
         except Exception as e:
             upstream_versions = {
                 'chillxand_controller': CHILLXAND_CONTROLLER_VERSION,
+                'xandminer': self._get_xandminer_version(),
                 'upstream_error': str(e)
             }
-
-        # Add xandminer version
-        upstream_versions['xandminer'] = self._get_xandminer_version()
         
         return upstream_versions
 
