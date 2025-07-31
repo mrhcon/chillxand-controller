@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.282"
+CHILLXAND_VERSION="v1.0.283"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -12,7 +12,7 @@ ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
 # Define allowed IPs with descriptive names
 declare -A ALLOWED_IPS=(
     ["74.208.234.116"]="Master USA"
-    ["85.215.145.173"]="Control2 Germany" 
+    ["85.215.145.173"]="Control2 Germany"
     ["194.164.163.124"]="Control3 Spain"
     ["174.114.192.84"]="Home"
     ["67.70.165.78"]="Home #2"
@@ -60,14 +60,14 @@ check_root() {
 # Update system and install dependencies
 install_dependencies() {
     log "Updating system packages (excluding problematic repositories)..."
-    
+
     # Create a temporary sources.list that excludes xandeum repository
     TEMP_SOURCES_DIR="/tmp/apt-sources-clean"
     mkdir -p "$TEMP_SOURCES_DIR"
-    
+
     # Copy main sources.list
     cp /etc/apt/sources.list "$TEMP_SOURCES_DIR/"
-    
+
     # Copy all sources.list.d files except xandeum ones
     if [[ -d "/etc/apt/sources.list.d" ]]; then
         mkdir -p "$TEMP_SOURCES_DIR/sources.list.d"
@@ -77,20 +77,20 @@ install_dependencies() {
             fi
         done
     fi
-    
+
     # Function to run apt-get with clean sources
     run_clean_apt() {
         apt-get -o Dir::Etc::SourceList="$TEMP_SOURCES_DIR/sources.list" \
                 -o Dir::Etc::SourceParts="$TEMP_SOURCES_DIR/sources.list.d" \
                 "$@"
     }
-    
+
     # Try updating with clean sources (no xandeum repo)
     if run_clean_apt update -qq; then
         log "Package lists updated successfully (excluding xandeum repository)"
     else
         warn "Clean apt-get update failed, trying fallback methods..."
-        
+
         # Fallback 1: Try with original sources but suppress xandeum errors
         if apt-get update 2>&1 | grep -v "xandeum" | grep -q "Reading package lists"; then
             log "Package lists updated with warnings filtered"
@@ -106,11 +106,11 @@ install_dependencies() {
     fi
 
     log "Installing required packages..."
-    
+
     # Install packages using clean sources first, then fallback to regular
     for package in ufw python3 python3-pip net-tools curl netcat-openbsd; do
         log "Installing $package..."
-        
+
         # Try with clean sources first
         if run_clean_apt install -y -qq "$package"; then
             log "Successfully installed $package (clean sources)"
@@ -128,7 +128,7 @@ install_dependencies() {
                 elif [[ "$package" == "curl" ]]; then
                     warn "Failed to install curl, endpoint testing will be limited"
                 elif [[ "$package" == "netcat-openbsd" ]]; then
-                    warn "Failed to install netcat-openbsd, UDP connectivity testing will be limited"                      
+                    warn "Failed to install netcat-openbsd, UDP connectivity testing will be limited"
                 else
                     error "Critical package $package could not be installed"
                     cleanup_temp_sources
@@ -139,7 +139,7 @@ install_dependencies() {
     done
 
     log "Installing Python requests module..."
-    
+
     # Try installing python3-requests with clean sources first
     if run_clean_apt install -y -qq python3-requests; then
         log "Successfully installed python3-requests via apt-get (clean sources)"
@@ -165,7 +165,7 @@ install_dependencies() {
             exit 1
         fi
     fi
-    
+
     # Clean up temporary sources
     cleanup_temp_sources
 }
@@ -184,7 +184,7 @@ create_python_script() {
     timestamp=$(date +%s)
     random_num=$((RANDOM % 10000))
     cache_bust="${timestamp}_${random_num}"
-    
+
     # Download the Python script template from GitHub
     if wget --no-cache --no-cookies --user-agent="ChillXandController/${timestamp}" -O /tmp/json-proxy-template.py "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/json-proxy.py?cb=${cache_bust}"; then
 
@@ -203,7 +203,7 @@ create_python_script() {
             python_ip_list+="    '$ip',   # ${ALLOWED_IPS[$ip]}"$'\n'
         fi
     done
-    
+
     # Replace placeholders
     sed -e "s/{{CHILLXAND_VERSION}}/$CHILLXAND_VERSION/g" \
         -e "s|{{ATLAS_API_URL}}|$ATLAS_API_URL|g" \
@@ -215,7 +215,7 @@ EOF
 
     # Clean up temp file
     rm -f /tmp/json-proxy-template.py
-    
+
     # Make it executable
     chmod +x /opt/json-proxy.py
     log "Python script configured with version $CHILLXAND_VERSION and made executable"
@@ -224,7 +224,7 @@ EOF
 # Create systemd service
 create_systemd_service() {
     log "Creating systemd service file..."
-    
+
     cat > /etc/systemd/system/json-proxy.service << 'EOF'
 [Unit]
 Description=JSON Proxy Service
@@ -251,17 +251,17 @@ EOF
 setup_service() {
     log "Reloading systemd daemon..."
     systemctl daemon-reload
-    
+
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
-    
+
     # Check if service is already running and restart if so, otherwise start fresh
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is already running, restarting to pick up new script..."
 
         # Create marker file to indicate expected termination
         touch /tmp/update-in-progress
-        
+
         systemctl restart json-proxy.service
 
         # If we get here, restart completed normally (shouldn't happen during update)
@@ -270,14 +270,14 @@ setup_service() {
         log "Starting json-proxy service..."
         systemctl start json-proxy.service
     fi
-    
+
     # Wait a moment for service to start
     sleep 3
-    
+
     log "Checking service status..."
     if systemctl is-active --quiet json-proxy.service; then
         log "Service is running successfully"
-        
+
         # Get the process start time to confirm it's using the new script
         service_pid=$(systemctl show json-proxy.service -p MainPID --value)
         if [[ -n "$service_pid" && "$service_pid" != "0" ]]; then
@@ -291,94 +291,9 @@ setup_service() {
     fi
 }
 
-# setup_firewall() {
-#     log "Configuring UFW firewall with IP restrictions..."
-    
-#     # Check if UFW is installed and available
-#     if ! command -v ufw &> /dev/null; then
-#         warn "UFW is not installed or not available. Skipping firewall configuration."
-#         warn "Port 3001 may not be accessible from outside without manual firewall configuration."
-#         return
-#     fi
-    
-#     # Check if UFW is enabled
-#     ufw_status=$(ufw status | head -1)
-#     if [[ "$ufw_status" == *"inactive"* ]]; then
-#         log "UFW is inactive, will configure and enable..."
-#         needs_setup=true
-#     else
-#         log "UFW is active, checking existing rules..."
-#         needs_setup=false
-        
-#         # Check if all required rules exist
-#         for ip in "${!ALLOWED_IPS[@]}"; do
-#             if [[ "$ip" != "127.0.0.1" ]] && ! ufw status | grep -q "3001.*$ip"; then
-#                 log "Missing rule for $ip (${ALLOWED_IPS[$ip]})"
-#                 needs_setup=true
-#                 break
-#             fi
-#         done
-        
-#         # Check if deny rule exists for port 3001
-#         if ! ufw status | grep -q "3001.*DENY"; then
-#             log "Missing deny rule for port 3001"
-#             needs_setup=true
-#         fi
-        
-#         # Check if SSH is allowed
-#         if ! ufw status | grep -q -E "(22|ssh).*ALLOW"; then
-#             log "Missing SSH rule"
-#             needs_setup=true
-#         fi
-#     fi
-    
-#     if [[ "$needs_setup" == "false" ]]; then
-#         log "All required UFW rules already exist, skipping firewall configuration"
-#         return
-#     fi
-    
-#     log "UFW configuration needed, proceeding with setup..."
-    
-#     # Only reset if we really need to reconfigure
-#     log "Resetting UFW rules..."
-#     ufw --force reset
-    
-#     # Set default policies
-#     log "Setting default UFW policies..."
-#     ufw default deny incoming
-#     ufw default allow outgoing
-    
-#     # Allow SSH (important - don't lock yourself out!)
-#     log "Allowing SSH access..."
-#     ufw allow ssh
-    
-#     # Allow the specific IPs to access port 3001
-#     log "Adding IP whitelist rules for port 3001..."
-    
-#     for ip in "${!ALLOWED_IPS[@]}"; do
-#         # Skip localhost for UFW rules (it's allowed by default)
-#         if [[ "$ip" != "127.0.0.1" ]]; then
-#             ufw allow from "$ip" to any port 3001 comment "${ALLOWED_IPS[$ip]}"
-#             log "Added rule for $ip (${ALLOWED_IPS[$ip]})"
-#         fi
-#     done
-    
-#     # Explicitly deny all other access to port 3001
-#     ufw deny 3001 comment 'Deny all other access to port 3001'
-#     log "Added deny rule for all other IPs on port 3001"
-    
-#     # Enable UFW
-#     log "Enabling UFW firewall..."
-#     ufw --force enable
-    
-#     # Show the status
-#     log "UFW firewall configuration complete. Current rules:"
-#     ufw status numbered
-# }
-
 setup_ufw_basics() {
     local ufw_status=$(ufw status | head -1)
-    
+
     if [[ "$ufw_status" == *"inactive"* ]]; then
         log "UFW is inactive, enabling with secure defaults..."
         ufw default deny incoming
@@ -386,13 +301,13 @@ setup_ufw_basics() {
         ufw --force enable
     else
         log "UFW is active, checking default policies..."
-        
+
         # Check if defaults are correct
         if ! ufw status verbose | grep -q "Default: deny (incoming)"; then
             log "Fixing incoming default policy..."
             ufw default deny incoming
         fi
-        
+
         if ! ufw status verbose | grep -q "Default: allow (outgoing)"; then
             log "Fixing outgoing default policy..."
             ufw default allow outgoing
@@ -461,7 +376,7 @@ check_and_fix_basic_rules() {
 
 check_and_fix_3001_rules() {
     log "Checking 3001 IP-specific rules..."
-    
+
     # Define IP-specific 3001 rules
     declare -A WANTED_3001_IPS
     for ip in "${!ALLOWED_IPS[@]}"; do
@@ -469,14 +384,14 @@ check_and_fix_3001_rules() {
             WANTED_3001_IPS["$ip"]="${ALLOWED_IPS[$ip]}"
         fi
     done
-    
+
     # Get current 3001 ALLOW rules (exclude comment lines)
     local current_3001_rules=$(ufw status | grep "3001.*ALLOW" | grep -v "127.0.0.1" | grep -v "^#")
-    
+
     # Check each IP we want
     for ip in "${!WANTED_3001_IPS[@]}"; do
         local comment="${WANTED_3001_IPS[$ip]}"
-        
+
         if echo "$current_3001_rules" | grep -q "$ip"; then
             log "✓ 3001 rule for $ip ($comment) exists"
         else
@@ -484,18 +399,18 @@ check_and_fix_3001_rules() {
             ufw allow from "$ip" to any port 3001 comment "$comment"
         fi
     done
-    
+
     # Check for any 3001 rules that shouldn't exist
     while IFS= read -r rule_line; do
         if [[ -n "$rule_line" && ! "$rule_line" =~ ^[[:space:]]*# ]]; then
             # Extract IP from rule line - handle the actual UFW format
             local rule_ip=$(echo "$rule_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
-            
+
             # Check if this IP is in our wanted list
             if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
                 log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
                 log "Removing unwanted 3001 rule for $rule_ip..."
-                
+
                 # Get rule number and delete it
                 local rule_num=$(ufw status numbered | grep "3001.*ALLOW.*$rule_ip" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
                 if [[ -n "$rule_num" ]]; then
@@ -550,10 +465,10 @@ remove_unwanted_rules() {
 show_final_status() {
     log "UFW configuration complete. Final status:"
     ufw status numbered
-    
+
     # Verification summary
     log "=== CONFIGURATION VERIFICATION ==="
-    
+
     # Count and verify each rule type
     local ssh_rules=$(ufw status | grep -c "22.*ALLOW.*Anywhere" || echo "0")
     local udp_rules=$(ufw status | grep -c "5000/udp.*ALLOW.*Anywhere" || echo "0")
@@ -562,7 +477,7 @@ show_final_status() {
     local local_4000=$(ufw status | grep -c "4000.*ALLOW.*127.0.0.1" || echo "0")
     local ip_3001_rules=$(ufw status | grep -c "3001.*ALLOW" || echo "0")
     local deny_3001=$(ufw status | grep -c "3001.*DENY.*Anywhere" || echo "0")
-    
+
     echo "✅ SSH (22/tcp): $ssh_rules rule(s)"
     echo "✅ UDP 5000: $udp_rules rule(s)"
     echo "✅ HTTP (80): $local_80 localhost rule(s)"
@@ -570,10 +485,10 @@ show_final_status() {
     echo "✅ Node.js (4000): $local_4000 localhost rule(s)"
     echo "✅ 3001 IP rules: $ip_3001_rules rule(s) - Expected: $((${#ALLOWED_IPS[@]} - 1))"
     echo "✅ 3001 deny: $deny_3001 rule(s)"
-    
+
     local total_rules=$(ufw status numbered | grep -c "^\[")
     log "Total UFW rules: $total_rules"
-    
+
     # Check for any broad rules on protected ports
     local security_issues=0
     for port in 80 3000 4000; do
@@ -582,40 +497,40 @@ show_final_status() {
             echo "⚠️  SECURITY ISSUE: Port $port has IPv4 broad access (should be localhost only)"
             security_issues=$((security_issues + 1))
         fi
-        
+
         # Check for IPv6 broad rules
         if ufw status | grep -q "${port}/tcp (v6).*ALLOW.*Anywhere (v6)"; then
             echo "⚠️  SECURITY ISSUE: Port $port has IPv6 broad access (should be localhost only)"
             security_issues=$((security_issues + 1))
         fi
     done
-    
+
     if [[ $security_issues -eq 0 ]]; then
         log "✓ No security issues detected - All protected ports properly restricted"
     else
         warn "$security_issues security issue(s) detected and noted above"
     fi
-    
+
     log "UFW configuration completed successfully"
 }
 
 setup_firewall() {
     log "Configuring UFW firewall with incremental rule management..."
-    
+
     # UFW should be available
     if ! command -v ufw &> /dev/null; then
         error "UFW is not available. Please install UFW first."
         exit 1
     fi
-    
+
     # Ensure UFW is enabled with proper defaults
     setup_ufw_basics
-    
+
     log "Checking and fixing UFW configuration..."
-    
+
     # Just do the work - check and fix in one pass
     check_and_fix_basic_rules
-    check_and_fix_3001_rules  
+    check_and_fix_3001_rules
     remove_unwanted_rules
     show_final_status
 }
@@ -623,34 +538,34 @@ setup_firewall() {
 # Test the installation
 test_installation() {
     log "Testing installation..."
-    
+
     # Test if the service is listening on port 3001
     port_check_success=false
-    
+
     if command -v netstat &> /dev/null; then
         if netstat -tlnp 2>/dev/null | grep -q ":3001 "; then
             log "Service is listening on port 3001 (detected via netstat)"
             port_check_success=true
         fi
     fi
-    
+
     if ! $port_check_success && command -v ss &> /dev/null; then
         if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
             log "Service is listening on port 3001 (detected via ss)"
             port_check_success=true
         fi
     fi
-    
+
     if ! $port_check_success; then
         warn "Could not verify if service is listening on port 3001"
         warn "This could be due to missing network tools or service startup delay"
     fi
-    
+
     # Test endpoints
     if command -v curl &> /dev/null; then
         log "Testing endpoints..."
         sleep 3  # Give service time to fully start
-        
+
         # Test health endpoint
         for attempt in 1 2 3; do
             if curl -s -f -m 10 "http://localhost:3001/health" > /dev/null 2>&1; then
@@ -661,7 +576,7 @@ test_installation() {
                 sleep 2
             fi
         done
-        
+
         # Test summary endpoint
         for attempt in 1 2 3; do
             if curl -s -f -m 10 "http://localhost:3001/summary" > /dev/null 2>&1; then
@@ -672,42 +587,42 @@ test_installation() {
                 sleep 2
             fi
         done
-        
+
         # Test stats endpoint
         if curl -s -f -m 10 "http://localhost:3001/stats" > /dev/null 2>&1; then
             log "✓ /stats endpoint responding successfully"
         else
             info "✗ /stats endpoint not responding (may be normal if upstream service is down)"
         fi
-        
+
         # Test versions endpoint
         if curl -s -f -m 10 "http://localhost:3001/versions" > /dev/null 2>&1; then
             log "✓ /versions endpoint responding successfully"
         else
             info "✗ /versions endpoint not responding (may be normal if upstream service is down)"
         fi
-        
+
         # Test status endpoints for each service
         log "Testing service status endpoints..."
-        
+
         if curl -s -m 5 "http://localhost:3001/status/pod" > /dev/null 2>&1; then
             log "✓ /status/pod endpoint responding successfully"
         else
             warn "✗ /status/pod endpoint not responding"
         fi
-        
+
         if curl -s -m 5 "http://localhost:3001/status/xandminer" > /dev/null 2>&1; then
             log "✓ /status/xandminer endpoint responding successfully"
         else
             warn "✗ /status/xandminer endpoint not responding"
         fi
-        
+
         if curl -s -m 5 "http://localhost:3001/status/xandminerd" > /dev/null 2>&1; then
             log "✓ /status/xandminerd endpoint responding successfully"
         else
             warn "✗ /status/xandminerd endpoint not responding"
         fi
-        
+
     else
         info "curl not available for testing HTTP endpoints"
         info "You can test manually with: curl http://localhost:3001/health"
@@ -753,7 +668,7 @@ show_completion_info() {
     echo "    * 85.215.145.173 (Control2 - Germany)"
     echo "    * 194.164.163.124 (Control3 - Spain)"
     echo "    * 174.114.192.84 (Home)"
-    echo "    * 67.70.165.78 (Home #2)"    
+    echo "    * 67.70.165.78 (Home #2)"
     echo "    * 127.0.0.1 (Localhost)"
     echo "  - All other IPs will receive 403 Forbidden"
     echo "  - UFW Firewall: Configured with IP restrictions"
@@ -789,10 +704,6 @@ show_completion_info() {
 }
 
 # Cleanup function for script interruption
-# cleanup() {
-#     error "Script interrupted. Cleaning up..."
-#     exit 1
-# }
 cleanup() {
     # Check if this is expected termination during service restart
     if [[ -f "/tmp/update-in-progress" ]]; then
@@ -809,9 +720,9 @@ cleanup() {
 # Main installation function
 main() {
     trap cleanup INT TERM
-    
+
     log "Starting JSON Proxy Service Installation..."
-    
+
     check_root
     install_dependencies
     setup_firewall
