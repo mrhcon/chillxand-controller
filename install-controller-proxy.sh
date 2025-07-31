@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.288"
+CHILLXAND_VERSION="v1.0.289"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -254,6 +254,8 @@ setup_service() {
 
     log "Enabling json-proxy service..."
     systemctl enable json-proxy.service
+
+    echo "Controller Update Status: restarting" >> /tmp/update.log 2>&1
 
     # Check if service is already running and restart if so, otherwise start fresh
     if systemctl is-active --quiet json-proxy.service; then

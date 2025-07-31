@@ -864,7 +864,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append('# Create marker file before running installer')
                 script_lines.append('touch /tmp/update-in-progress')
                 script_lines.append('')
-                script_lines.append('echo "Controller Update Status: restarting" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
                 script_lines.append('# Run installer - this will likely terminate our script when service restarts')
                 script_lines.append('echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1')
                 script_lines.append('./install-controller-proxy.sh >> /tmp/update.log 2>&1')
