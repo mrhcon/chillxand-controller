@@ -203,11 +203,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 # Split into lines for easier parsing
                 log_lines = log_content.strip().split('\n') if log_content.strip() else []
 
-                # PARSE STATUS LINES - Look for most recent "Status: " line
+                # PARSE STATUS LINES - Look for most recent "Controller Update Status: " line
                 parsed_status = 'unknown'
                 for line in reversed(log_lines):  # Start from the end (most recent)
-                    if line.strip().startswith('Status: '):
-                        parsed_status = line.strip().replace('Status: ', '')
+                    if line.strip().startswith('Controller Update Status: '):
+                        parsed_status = line.strip().replace('Controller Update Status: ', '')
                         break
 
                 # If no status line found, determine status based on log content (fallback)
@@ -821,7 +821,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append('sleep 2')
                 script_lines.append('')
                 script_lines.append('echo "Starting controller update with callback validation..." > /tmp/update.log 2>&1')
-                script_lines.append('echo "Status: update_initiated" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
+                script_lines.append('echo "Controller Update Status: update_initiated" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
                 script_lines.append(f'echo "Current version: {current_version}" >> /tmp/update.log 2>&1')
                 script_lines.append(f'echo "Target version: {github_version}" >> /tmp/update.log 2>&1')
                 script_lines.append(f'echo "Cache-busting: {cache_bust}" >> /tmp/update.log 2>&1')
@@ -840,7 +840,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append('rm -f install-controller-proxy.sh install-controller-proxy-*.sh')
                 script_lines.append('echo "Cleaned up existing files" >> /tmp/update.log 2>&1')
                 script_lines.append('')
-                script_lines.append('echo "Status: in_progress" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
+                script_lines.append('echo "Controller Update Status: in_progress" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
                 script_lines.append('#  Download fresh file')
                 script_lines.append('echo "Downloading fresh script..." >> /tmp/update.log 2>&1')
                 script_lines.append(f'wget --no-cache --no-cookies --user-agent="ChillXandController/{timestamp}" -O install-controller-proxy.sh "https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/install-controller-proxy.sh?cb={cache_bust}" >> /tmp/update.log 2>&1')
@@ -861,7 +861,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 script_lines.append('# Create marker file before running installer')
                 script_lines.append('touch /tmp/update-in-progress')
                 script_lines.append('')
-                script_lines.append('echo "Status: restarting" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
+                script_lines.append('echo "Controller Update Status: restarting" >> /tmp/update.log 2>&1')  # ADD STATUS LINE
                 script_lines.append('# Run installer - this will likely terminate our script when service restarts')
                 script_lines.append('echo "Running installer (service will restart)..." >> /tmp/update.log 2>&1')
                 script_lines.append('./install-controller-proxy.sh >> /tmp/update.log 2>&1')
@@ -1493,16 +1493,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 
             if version_updated and all_endpoints_passed:
                 self._append_to_log("Update validation COMPLETED SUCCESSFULLY")
-                self._append_to_log("Status: complete_success")
+                self._append_to_log("Controller Update Status: complete_success")
                 self._append_to_log("All endpoints responding correctly")
                 self._append_to_log("Update process finished")
             elif version_updated:
                 self._append_to_log("Update validation COMPLETED WITH WARNINGS")
-                self._append_to_log("Status: complete_warn")
+                self._append_to_log("Controller Update Status: complete_warn")
                 self._append_to_log("Version updated but some endpoints failed")
             else:
                 self._append_to_log("Update validation FAILED")
-                self._append_to_log("Status: complete_fail")
+                self._append_to_log("Controller Update Status: complete_fail")
                 self._append_to_log("Version did not update properly")
 
             # Clear the update state since we're done
@@ -1604,19 +1604,19 @@ if __name__ == "__main__":
 
                         if all_endpoints_passed:
                             temp_handler._append_to_log("Update validation COMPLETED SUCCESSFULLY")
-                            temp_handler._append_to_log("Status: complete_success")
+                            temp_handler._append_to_log("Controller Update Status: complete_success")
                             temp_handler._append_to_log("All endpoints responding correctly")
                             temp_handler._append_to_log("Update process finished")
                             print("✓ Update validation: SUCCESS")
                         else:
                             temp_handler._append_to_log("Update validation COMPLETED WITH WARNINGS")
-                            temp_handler._append_to_log("Status: complete_warn")
+                            temp_handler._append_to_log("Controller Update Status: complete_warn")
                             temp_handler._append_to_log("Version updated but some endpoints failed")
                             print("⚠ Update validation: SUCCESS with warnings")
                     else:
                         temp_handler._append_to_log(f"WARNING: Version mismatch. Expected: {update_state.get('target_version')}, Got: {CHILLXAND_CONTROLLER_VERSION}")
                         temp_handler._append_to_log("Update validation FAILED")
-                        temp_handler._append_to_log("Status: complete_fail")
+                        temp_handler._append_to_log("Controller Update Status: complete_fail")
                         temp_handler._append_to_log("Version did not update properly")
                         print("✗ Update validation: FAILED")
 
