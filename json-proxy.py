@@ -206,8 +206,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 # PARSE STATUS LINES - Look for most recent "Controller Update Status: " line
                 parsed_status = 'unknown'
                 for line in reversed(log_lines):  # Start from the end (most recent)
-                    if line.strip().startswith('Controller Update Status: '):
-                        parsed_status = line.strip().replace('Controller Update Status: ', '')
+                    line_stripped = line.strip()
+                    if 'Controller Update Status: ' in line_stripped:  # Changed from startswith to 'in'
+                        # Extract just the status part
+                        status_start = line_stripped.find('Controller Update Status: ') + len('Controller Update Status: ')
+                        parsed_status = line_stripped[status_start:]
                         break
 
                 # If no status line found, determine status based on log content (fallback)
