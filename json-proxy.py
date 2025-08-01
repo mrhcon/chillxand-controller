@@ -124,14 +124,15 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 atlas_data = response.json()
 
                 # Check if our IP is in the pods list
-                # Atlas returns: {"pods": ["ip:port", ...], "pods_count": 109}
+                # Atlas returns: {"pods": [{"address": "ip:port", "version": "0.3.3"}, ...], "pods_count": 8}
                 found_pod = None
                 found_ip = False
 
                 if 'pods' in atlas_data and isinstance(atlas_data['pods'], list):
                     for pod_entry in atlas_data['pods']:
-                        # Each entry is in format "ip:port"
-                        pod_ip = pod_entry.split(':')[0] if ':' in pod_entry else pod_entry
+                        # Each entry is an object with "address" field
+                        pod_address = pod_entry['address']
+                        pod_ip = pod_address.split(':')[0]
                         if pod_ip == server_ip:
                             found_pod = pod_entry
                             found_ip = True
