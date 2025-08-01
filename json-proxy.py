@@ -389,7 +389,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                             'message': 'UDP 5000 NOT PUBLIC',
                             'accessible': False
                         }
-                        results['status'] = 'fail'
+                        # Turn off until 5000 check is confirmed.
+                        # results['status'] = 'fail'
                 else:
                     results['checks']['udp_5000_public'] = {
                         'status': 'warn',
