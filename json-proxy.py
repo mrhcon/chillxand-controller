@@ -217,9 +217,9 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 # If no status line found, determine status based on log content (fallback)
                 if parsed_status == 'unknown':
                     if 'Update completed successfully' in log_content:
-                        parsed_status = 'completed_success'
+                        parsed_status = 'complete_success'
                     elif 'error' in log_content.lower() or 'failed' in log_content.lower():
-                        parsed_status = 'completed_error'
+                        parsed_status = 'complete_fail'
                     elif log_content.strip():
                         parsed_status = 'in_progress'
                     else:
@@ -303,9 +303,9 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 
                 # Determine status based on log content
                 if 'Pod update completed successfully' in log_content:
-                    status = 'completed_success'
+                    status = 'complete_success'
                 elif 'error' in log_content.lower() or 'failed' in log_content.lower():
-                    status = 'completed_error'
+                    status = 'completed_fail'
                 elif log_content.strip():
                     status = 'in_progress'
                 else:
@@ -680,7 +680,12 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Build the working directory command
             working_dir_cmd = f'echo "Working directory: {dollar}{open_paren}pwd{close_paren}" >> /tmp/pod-update.log 2>&1'
             script_lines.append(working_dir_cmd)
-
+            
+            script_lines.append('')
+            script_lines.append('# Remove all the conflicting files from apt sources')
+            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.list')
+            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.sources')
+            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.list.distUpgrade')
             script_lines.append('')
             script_lines.append('# Clean up any existing installer files')
             script_lines.append('rm -f install.sh install-*.sh')
