@@ -305,7 +305,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 if 'Pod update completed successfully' in log_content:
                     status = 'complete_success'
                 elif 'error' in log_content.lower() or 'failed' in log_content.lower():
-                    status = 'completed_fail'
+                    status = 'complete_fail'
                 elif log_content.strip():
                     status = 'in_progress'
                 else:
