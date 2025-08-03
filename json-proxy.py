@@ -169,18 +169,23 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
 
     # Check for real failures, excluding benign network messages
-    def has_real_failures(log_content):
+    def has_real_failure(log_content):
         lines = log_content.split('\n')
         
         for line in lines:
-            line_lower = line.lower()
+            line_lower = line.lower().strip()
             
-            # Skip benign network retry messages
-            if 'no route to host' in line_lower and 'connecting to' in line_lower:
+            # Skip React warnings and benign messages
+            if any(skip_pattern in line_lower for skip_pattern in [
+                'setisconnectionerror',  # React dependency warning
+                'warning: react hook',   # React warnings
+                'eslint rules',          # ESLint info
+                'no route to host'       # IPv6 fallback
+            ]):
                 continue
-                
-            # Check for actual failure patterns
-            if any(pattern in line_lower for pattern in [
+            
+            # Look for actual failure indicators
+            if any(error_pattern in line_lower for error_pattern in [
                 'error:', 'fatal:', 'failed:', 'cannot stat', 
                 'permission denied', 'command not found', 
                 'no such file or directory', 'operation failed',
