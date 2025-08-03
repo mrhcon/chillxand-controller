@@ -686,9 +686,9 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 
             script_lines.append('echo "Remove all the conflicting files from apt sources" > /tmp/pod-update.log 2>&1')
             script_lines.append('# Remove all the conflicting files from apt sources')
-            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.list')
-            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.sources')
-            script_lines.append('rm /etc/apt/sources.list.d/xandeum-pod.list.distUpgrade')
+            script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.list')
+            script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.sources')
+            script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.list.distUpgrade')
             script_lines.append('echo "Removed all the conflicting files from apt sources" > /tmp/pod-update.log 2>&1')            
             script_lines.append('')
             script_lines.append('echo "Clean up any existing installer files" > /tmp/pod-update.log 2>&1')
