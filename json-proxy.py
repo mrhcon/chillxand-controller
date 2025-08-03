@@ -671,7 +671,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             script_lines.append('echo "Starting pod update using Xandeum installer..." > /tmp/pod-update.log 2>&1')
             script_lines.append(f'echo "Timestamp: {current_time}" >> /tmp/pod-update.log 2>&1')
             script_lines.append('')
-            script_lines.append('cd /tmp')
+            script_lines.append('cd /root')
 
             dollar = '$'
             open_paren = '('
@@ -682,16 +682,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             script_lines.append(working_dir_cmd)
             
             script_lines.append('')
-            script_lines.append('echo "Starting pod update..." > /tmp/pod-update.log 2>&1')
+            script_lines.append('echo "Starting pod update..." >> /tmp/pod-update.log 2>&1')
 
-            script_lines.append('echo "Remove all the conflicting files from apt sources" > /tmp/pod-update.log 2>&1')
+            script_lines.append('echo "Remove all the conflicting files from apt sources" >> /tmp/pod-update.log 2>&1')
             script_lines.append('# Remove all the conflicting files from apt sources')
             script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.list')
             script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.sources')
             script_lines.append('rm -f /etc/apt/sources.list.d/xandeum-pod.list.distUpgrade')
-            script_lines.append('echo "Removed all the conflicting files from apt sources" > /tmp/pod-update.log 2>&1')            
+            script_lines.append('echo "Removed all the conflicting files from apt sources" >> /tmp/pod-update.log 2>&1')            
             script_lines.append('')
-            script_lines.append('echo "Clean up any existing installer files" > /tmp/pod-update.log 2>&1')
+            script_lines.append('echo "Clean up any existing installer files" >> /tmp/pod-update.log 2>&1')
             script_lines.append('# Clean up any existing installer files')
             script_lines.append('rm -f install.sh install-*.sh')
             script_lines.append('echo "Cleaned up existing installer files" >> /tmp/pod-update.log 2>&1')
