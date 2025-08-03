@@ -168,6 +168,28 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': self._get_current_time()
             }
 
+    # Check for real failures, excluding benign network messages
+    def has_real_failures(log_content):
+        lines = log_content.split('\n')
+        
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Skip benign network retry messages
+            if 'no route to host' in line_lower and 'connecting to' in line_lower:
+                continue
+                
+            # Check for actual failure patterns
+            if any(pattern in line_lower for pattern in [
+                'error:', 'fatal:', 'failed:', 'cannot stat', 
+                'permission denied', 'command not found', 
+                'no such file or directory', 'operation failed',
+                'install failed', 'update failed', 'build failed'
+            ]):
+                return True
+        
+        return False
+
     def _get_update_log(self):
         """Get the contents of the update log file"""
         try:
@@ -218,7 +240,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 if parsed_status == 'unknown':
                     if 'Update completed successfully' in log_content:
                         parsed_status = 'complete_success'
-                    elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    elif has_real_failures(log_content):
                         parsed_status = 'complete_fail'
                     elif log_content.strip():
                         parsed_status = 'in_progress'
