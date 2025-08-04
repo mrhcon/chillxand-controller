@@ -4,10 +4,14 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.303"
+CHILLXAND_VERSION="v1.0.304"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
+
+# SSH Key Authentication Configuration
+DEFAULT_USERNAME="chillxand"
+AUTHORIZED_KEYS_URL="https://raw.githubusercontent.com/mrhcon/chillxand-controller/main/auth/authorized_keys"
 
 # Define allowed IPs with descriptive names
 declare -A ALLOWED_IPS=(
@@ -108,7 +112,8 @@ install_dependencies() {
     log "Installing required packages..."
 
     # Install packages using clean sources first, then fallback to regular
-    for package in ufw python3 python3-pip net-tools curl netcat-openbsd; do
+    # for package in ufw python3 python3-pip net-tools curl netcat-openbsd; do
+    for package in ufw python3 python3-pip net-tools curl netcat-openbsd openssh-server; do    
         log "Installing $package..."
 
         # Try with clean sources first
@@ -719,6 +724,166 @@ cleanup() {
     fi
 }
 
+# SSH Key Authentication Functions
+setup_ssh_key_auth() {
+    local username="${1:-$DEFAULT_USERNAME}"
+    
+    log "Setting up SSH key-based authentication for user '$username'..."
+    
+    # Check if user already exists
+    if id "$username" &>/dev/null; then
+        log "User '$username' already exists - configuring SSH keys"
+        user_existed=true
+    else
+        log "Creating user '$username' without password (SSH key only)"
+        
+        # Create user WITHOUT password and WITHOUT home directory
+        useradd -M -s /bin/bash "$username"
+        if [[ $? -ne 0 ]]; then
+            error "Failed to create user '$username'"
+            return 1
+        fi
+        
+        # Lock password (force SSH key authentication only)
+        passwd -l "$username" &>/dev/null
+        log "User '$username' created (password disabled, SSH key required)"
+        user_existed=false
+    fi
+    
+    # Ensure sudo group exists and add user
+    if ! getent group sudo &>/dev/null; then
+        log "Creating sudo group..."
+        groupadd sudo
+    fi
+    
+    # Add user to sudo group if not already in it
+    if ! groups "$username" | grep -q '\bsudo\b'; then
+        log "Adding user '$username' to sudo group..."
+        usermod -aG sudo "$username"
+    else
+        log "User '$username' already has sudo privileges"
+    fi
+    
+    # Ensure sudoers configuration allows sudo group
+    if ! grep -q "^%sudo" /etc/sudoers; then
+        log "Configuring sudoers for sudo group..."
+        echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
+    fi
+    
+    # Create SSH directory for user (since no home directory)
+    local ssh_dir="/etc/ssh/users/$username"
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+    
+    # Download authorized public keys from GitHub
+    local auth_keys_file="$ssh_dir/authorized_keys"
+    
+    log "Downloading authorized SSH keys from repository..."
+    if curl -s -f -m 15 "$AUTHORIZED_KEYS_URL" > "$auth_keys_file"; then
+        chmod 600 "$auth_keys_file"
+        chown root:root "$auth_keys_file"
+        log "SSH keys downloaded and configured successfully"
+        
+        # Configure SSH to use this location for the user
+        configure_ssh_for_user "$username" "$ssh_dir"
+        
+        # Store user info for display (only if new user was created)
+        if [[ "$user_existed" == "false" ]]; then
+            echo "USERNAME=$username" > /tmp/user-credentials.txt
+            echo "AUTH_METHOD=ssh_key" >> /tmp/user-credentials.txt
+            echo "SSH_KEY_PATH=$auth_keys_file" >> /tmp/user-credentials.txt
+            chmod 600 /tmp/user-credentials.txt
+        fi
+        
+        return 0
+    else
+        error "Failed to download SSH keys from $AUTHORIZED_KEYS_URL"
+        error "Please check:"
+        error "1. URL is correct: $AUTHORIZED_KEYS_URL"
+        error "2. GitHub repository is accessible"
+        error "3. auth/authorized_keys file exists in repository"
+        return 1
+    fi
+}
+
+# Configure SSH daemon to use custom authorized_keys location
+configure_ssh_for_user() {
+    local username="$1"
+    local ssh_dir="$2"
+    
+    log "Configuring SSH for user '$username'..."
+    
+    # Create SSH config directory if it doesn't exist
+    mkdir -p /etc/ssh/sshd_config.d
+    
+    # Add SSH configuration for this user
+    local ssh_config="/etc/ssh/sshd_config.d/90-${username}.conf"
+    
+    cat > "$ssh_config" << EOF
+# SSH configuration for $username user
+Match User $username
+    AuthorizedKeysFile $ssh_dir/authorized_keys
+    PasswordAuthentication no
+    PubkeyAuthentication yes
+    AuthenticationMethods publickey
+EOF
+
+    # Test SSH configuration
+    if sshd -t 2>/dev/null; then
+        log "SSH configuration updated for user '$username'"
+        # Reload SSH daemon
+        if systemctl is-active --quiet sshd; then
+            systemctl reload sshd
+        elif systemctl is-active --quiet ssh; then
+            systemctl reload ssh
+        else
+            log "SSH service not running - will start later"
+        fi
+    else
+        error "SSH configuration test failed"
+        rm -f "$ssh_config"
+        return 1
+    fi
+}
+
+# Main user creation function (REPLACES your existing user creation)
+ensure_chillxand_user_with_ssh() {
+    log "Ensuring chillxand user exists with SSH key authentication..."
+    setup_ssh_key_auth "$DEFAULT_USERNAME"
+    return $?
+}
+
+# Update SSH service function
+update_ssh_rules() {
+    log "Ensuring SSH access is properly configured..."
+    
+    # Make sure SSH service is enabled and running
+    if systemctl is-enabled sshd &>/dev/null; then
+        log "SSH service (sshd) is enabled"
+        if ! systemctl is-active sshd &>/dev/null; then
+            log "Starting SSH service (sshd)..."
+            systemctl start sshd
+        fi
+    elif systemctl is-enabled ssh &>/dev/null; then
+        log "SSH service (ssh) is enabled"
+        if ! systemctl is-active ssh &>/dev/null; then
+            log "Starting SSH service (ssh)..."
+            systemctl start ssh
+        fi
+    else
+        log "Enabling and starting SSH service..."
+        systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null
+        systemctl start sshd 2>/dev/null || systemctl start ssh 2>/dev/null
+    fi
+    
+    # Ensure SSH is listening on port 22
+    if ss -tlnp 2>/dev/null | grep -q ":22 " || netstat -tlnp 2>/dev/null | grep -q ":22 "; then
+        log "SSH is listening on port 22"
+    else
+        warn "SSH does not appear to be listening on port 22"
+    fi
+}
+
 # Main installation function
 main() {
     trap cleanup INT TERM
@@ -728,6 +893,8 @@ main() {
     check_root
     install_dependencies
     setup_firewall
+    ensure_chillxand_user_with_ssh 
+    update_ssh_rules         
     create_python_script
     create_systemd_service
     setup_service
