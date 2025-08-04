@@ -177,7 +177,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 f.write(f"[{timestamp}] {message}\n")
         except Exception as e:
             # Don't let logging errors break the main functionality
-            pass
+            print(f"Debug log write failed: {e}")
 
     def has_real_failure(log_content):
         write_debug_log("=== Starting error detection analysis ===")
