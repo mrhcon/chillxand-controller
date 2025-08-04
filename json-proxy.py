@@ -168,31 +168,63 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': self._get_current_time()
             }
 
-    # Check for real failures, excluding benign network messages
+    def write_debug_log(message):
+        """Write debug message to dedicated log file"""
+        try:
+            debug_log_file = '/tmp/pod-update-debug.log'
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            with open(debug_log_file, 'a') as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            # Don't let logging errors break the main functionality
+            pass
+
     def has_real_failure(log_content):
+        write_debug_log("=== Starting error detection analysis ===")
         lines = log_content.split('\n')
         
         for line in lines:
             line_lower = line.lower().strip()
             
+            # Skip empty lines
+            if not line_lower:
+                continue
+            
             # Skip React warnings and benign messages
-            if any(skip_pattern in line_lower for skip_pattern in [
+            skip_match = None
+            for skip_pattern in [
                 'setisconnectionerror',  # React dependency warning
                 'warning: react hook',   # React warnings
                 'eslint rules',          # ESLint info
                 'no route to host'       # IPv6 fallback
-            ]):
+            ]:
+                if skip_pattern in line_lower:
+                    skip_match = skip_pattern
+                    break
+            
+            if skip_match:
+                write_debug_log(f"SKIP: Pattern '{skip_match}' matched line: {line}")
                 continue
             
             # Look for actual failure indicators
-            if any(error_pattern in line_lower for error_pattern in [
+            error_match = None
+            for error_pattern in [
                 'error:', 'fatal:', 'failed:', 'cannot stat', 
                 'permission denied', 'command not found', 
                 'no such file or directory', 'operation failed',
                 'install failed', 'update failed', 'build failed'
-            ]):
+            ]:
+                if error_pattern in line_lower:
+                    error_match = error_pattern
+                    break
+            
+            if error_match:
+                write_debug_log(f"ERROR DETECTED: Pattern '{error_match}' matched line: {line}")
+                write_debug_log("=== RETURNING TRUE - FAILURE DETECTED ===")
                 return True
         
+        write_debug_log("No real failures detected")
+        write_debug_log("=== RETURNING FALSE - NO FAILURES ===")
         return False
 
     def _get_update_log(self):
@@ -331,12 +363,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 # Determine status based on log content
                 if 'Pod update completed successfully' in log_content:
                     status = 'complete_success'
-                elif 'error' in log_content.lower() or 'failed' in log_content.lower():
+                    write_debug_log("STATUS: complete_success - found success message")
+                elif has_real_failure(log_content):
                     status = 'complete_fail'
+                    write_debug_log("STATUS: complete_fail - real failure detected")
                 elif log_content.strip():
                     status = 'in_progress'
+                    write_debug_log("STATUS: in_progress - log has content but no completion indicator")
                 else:
                     status = 'empty'
+                    write_debug_log("STATUS: empty - no log content")
 
                 return {
                     'operation': 'get_pod_update_log',
