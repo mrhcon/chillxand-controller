@@ -168,7 +168,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': self._get_current_time()
             }
 
-    def write_debug_log(message):
+    def write_debug_log(self, message):
         """Write debug message to dedicated log file"""
         try:
             debug_log_file = '/tmp/pod-update-debug.log'
@@ -179,8 +179,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Don't let logging errors break the main functionality
             print(f"Debug log write failed: {e}")
 
-    def has_real_failure(log_content):
-        write_debug_log("=== Starting error detection analysis ===")
+    def has_real_failure(self, log_content):
+        self.write_debug_log("=== Starting error detection analysis ===")
         lines = log_content.split('\n')
         
         for line in lines:
@@ -203,7 +203,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     break
             
             if skip_match:
-                write_debug_log(f"SKIP: Pattern '{skip_match}' matched line: {line}")
+                self.write_debug_log(f"SKIP: Pattern '{skip_match}' matched line: {line}")
                 continue
             
             # Look for actual failure indicators
@@ -219,12 +219,12 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     break
             
             if error_match:
-                write_debug_log(f"ERROR DETECTED: Pattern '{error_match}' matched line: {line}")
-                write_debug_log("=== RETURNING TRUE - FAILURE DETECTED ===")
+                self.write_debug_log(f"ERROR DETECTED: Pattern '{error_match}' matched line: {line}")
+                self.write_debug_log("=== RETURNING TRUE - FAILURE DETECTED ===")
                 return True
         
-        write_debug_log("No real failures detected")
-        write_debug_log("=== RETURNING FALSE - NO FAILURES ===")
+        self.write_debug_log("No real failures detected")
+        self.write_debug_log("=== RETURNING FALSE - NO FAILURES ===")
         return False
 
     def _get_update_log(self):
@@ -277,7 +277,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 if parsed_status == 'unknown':
                     if 'Update completed successfully' in log_content:
                         parsed_status = 'complete_success'
-                    elif has_real_failures(log_content):
+                    elif self.has_real_failures(log_content):
                         parsed_status = 'complete_fail'
                     elif log_content.strip():
                         parsed_status = 'in_progress'
@@ -363,16 +363,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 # Determine status based on log content
                 if 'Pod update completed successfully' in log_content:
                     status = 'complete_success'
-                    write_debug_log("STATUS: complete_success - found success message")
-                elif has_real_failure(log_content):
+                    self.write_debug_log("STATUS: complete_success - found success message")
+                elif self.has_real_failure(log_content):
                     status = 'complete_fail'
-                    write_debug_log("STATUS: complete_fail - real failure detected")
+                    self.write_debug_log("STATUS: complete_fail - real failure detected")
                 elif log_content.strip():
                     status = 'in_progress'
-                    write_debug_log("STATUS: in_progress - log has content but no completion indicator")
+                    self.write_debug_log("STATUS: in_progress - log has content but no completion indicator")
                 else:
                     status = 'empty'
-                    write_debug_log("STATUS: empty - no log content")
+                    self.write_debug_log("STATUS: empty - no log content")
 
                 return {
                     'operation': 'get_pod_update_log',
