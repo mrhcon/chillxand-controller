@@ -565,7 +565,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
 
     def _get_stats_data(self):
         try:
-            response = requests.get('http://localhost:80/stats', timeout=5)
+            response = requests.get('http://localhost:8000/stats', timeout=5)
             if response.status_code == 200:
                 return response.json()
             else:
@@ -1289,7 +1289,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json_response(summary_data)
 
             elif self.path == '/stats':
-                response = requests.get('http://localhost:80/stats', timeout=10)
+                response = requests.get('http://localhost:8000/stats', timeout=10)
                 self.send_response(response.status_code)
                 self.send_header('Content-type', 'application/json')
                 self._set_cors_headers()
