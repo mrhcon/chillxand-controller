@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.0.304"
+CHILLXAND_VERSION="v1.1.0"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -773,14 +773,17 @@ setup_ssh_key_auth() {
     # Create SSH directory for user (since no home directory)
     local ssh_dir="/etc/ssh/users/$username"
     mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
+
+    # Set correct permissions for SSH to read the directory and keys
+    chmod 755 /etc/ssh/users
+    chmod 755 "$ssh_dir"
     
     # Download authorized public keys from GitHub
     local auth_keys_file="$ssh_dir/authorized_keys"
     
     log "Downloading authorized SSH keys from repository..."
     if curl -s -f -m 15 "$AUTHORIZED_KEYS_URL" > "$auth_keys_file"; then
-        chmod 600 "$auth_keys_file"
+        chmod 644 "$auth_keys_file"
         chown root:root "$auth_keys_file"
         log "SSH keys downloaded and configured successfully"
         
