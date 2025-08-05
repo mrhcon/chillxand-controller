@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.0"
+CHILLXAND_VERSION="v1.1.1"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -770,6 +770,12 @@ setup_ssh_key_auth() {
         echo "%sudo   ALL=(ALL:ALL) ALL" >> /etc/sudoers
     fi
     
+    # Configure passwordless sudo for chillxand user
+    log "Configuring passwordless sudo for user '$username'..."
+    echo "$username ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$username"
+    chmod 440 "/etc/sudoers.d/$username"
+    log "Passwordless sudo configured for user '$username'"
+
     # Create SSH directory for user (since no home directory)
     local ssh_dir="/etc/ssh/users/$username"
     mkdir -p "$ssh_dir"
