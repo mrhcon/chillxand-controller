@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.3"
+CHILLXAND_VERSION="v1.1.4"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -342,7 +342,7 @@ check_and_fix_basic_rules() {
     fi
 
     # Check localhost-only rules and fix broad rules
-    local_ports=("8000:Pod HTTP" "3000:Next.js" "4000:Node.js")
+    local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
 
     for port_desc in "${local_ports[@]}"; do
         IFS=':' read -r port desc <<< "$port_desc"
@@ -433,7 +433,7 @@ remove_unwanted_rules() {
     log "Checking for and removing unwanted rules (IPv4 and IPv6)..."
 
     # Define ports that should NOT have broad ALLOW rules
-    local protected_ports=("8000" "3000" "4000")
+    local protected_ports=("80" "3000" "4000")
 
     for port in "${protected_ports[@]}"; do
         # FIXED: Check for broad IPv4 TCP rules on protected ports
@@ -479,7 +479,7 @@ show_final_status() {
     # Count and verify each rule type
     local ssh_rules=$(ufw status | grep -c "22.*ALLOW.*Anywhere" || echo "0")
     local udp_rules=$(ufw status | grep -c "5000/udp.*ALLOW.*Anywhere" || echo "0")
-    local local_8000=$(ufw status | grep -c "8000.*ALLOW.*127.0.0.1" || echo "0")
+    local local_80=$(ufw status | grep -c "80.*ALLOW.*127.0.0.1" || echo "0")
     local local_3000=$(ufw status | grep -c "3000.*ALLOW.*127.0.0.1" || echo "0")
     local local_4000=$(ufw status | grep -c "4000.*ALLOW.*127.0.0.1" || echo "0")
     local ip_3001_rules=$(ufw status | grep -c "3001.*ALLOW" || echo "0")
@@ -487,7 +487,7 @@ show_final_status() {
 
     echo "✅ SSH (22/tcp): $ssh_rules rule(s)"
     echo "✅ UDP 5000: $udp_rules rule(s)"
-    echo "✅ HTTP (8000): $local_8000 localhost rule(s)"
+    echo "✅ HTTP (80): $local_80 localhost rule(s)"
     echo "✅ Next.js (3000): $local_3000 localhost rule(s)"
     echo "✅ Node.js (4000): $local_4000 localhost rule(s)"
     echo "✅ 3001 IP rules: $ip_3001_rules rule(s) - Expected: $((${#ALLOWED_IPS[@]} - 1))"
@@ -498,7 +498,7 @@ show_final_status() {
 
     # Check for any broad rules on protected ports
     local security_issues=0
-    for port in 8000 3000 4000; do
+    for port in 80 3000 4000; do
         # Check for IPv4 broad rules
         if ufw status | grep "${port}/tcp.*ALLOW.*Anywhere" | grep -v "(v6)" | grep -q "ALLOW"; then
             echo "⚠️  SECURITY ISSUE: Port $port has IPv4 broad access (should be localhost only)"
@@ -652,7 +652,7 @@ show_completion_info() {
     info "Available Endpoints:"
     echo "  - GET /health       - RFC-compliant health check with service monitoring"
     echo "  - GET /summary      - Complete system summary with controller version"
-    echo "  - GET /stats        - Proxy to localhost:8000/stats"
+    echo "  - GET /stats        - Proxy to localhost:80/stats"
     echo "  - GET /versions     - Proxy to localhost:4000/versions + controller version"
     echo "  - GET /status/pod   - Pod service status"
     echo "  - GET /status/xandminer - Xandminer service status"
