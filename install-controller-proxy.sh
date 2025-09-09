@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.10"
+CHILLXAND_VERSION="v1.1.11"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -376,6 +376,25 @@ check_and_fix_basic_rules() {
 }
 
 check_and_fix_3001_rules() {
+    # log "Checking 3001 IP-specific rules..."
+
+    # # Remove existing 3001 DENY rule first to ensure proper ordering
+    # if ufw status | grep -q "3001.*DENY.*Anywhere"; then
+    #     log "Temporarily removing existing 3001 DENY rule to ensure proper ordering..."
+    #     ufw delete deny 3001
+    # fi
+
+    # # Define IP-specific 3001 rules
+    # declare -A WANTED_3001_IPS
+    # for ip in "${!ALLOWED_IPS[@]}"; do
+    #     if [[ "$ip" != "127.0.0.1" ]]; then
+    #         WANTED_3001_IPS["$ip"]="${ALLOWED_IPS[$ip]}"
+    #     fi
+    # done
+
+    # # Get current 3001 ALLOW rules (exclude comment lines)
+    # local current_3001_rules=$(ufw status | grep "3001.*ALLOW" | grep -v "127.0.0.1" | grep -v "^#")
+
     log "Checking 3001 IP-specific rules..."
 
     # Remove existing 3001 DENY rule first to ensure proper ordering
@@ -394,6 +413,9 @@ check_and_fix_3001_rules() {
 
     # Get current 3001 ALLOW rules (exclude comment lines)
     local current_3001_rules=$(ufw status | grep "3001.*ALLOW" | grep -v "127.0.0.1" | grep -v "^#")
+    
+    # Get numbered rules for deletion lookup
+    local numbered_rules=$(ufw status numbered)
 
     # Check each IP we want
     for ip in "${!WANTED_3001_IPS[@]}"; do
@@ -448,8 +470,8 @@ check_and_fix_3001_rules() {
             if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
                 log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
                 
-                # Get rule number for deletion
-                local rule_num=$(ufw status numbered | grep "3001.*ALLOW.*$rule_ip" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
+                # Get rule number for deletion using pre-fetched numbered output
+                local rule_num=$(echo "$numbered_rules" | grep "3001.*ALLOW.*$rule_ip" | head -1 | sed -n 's/^\[\([0-9]*\)\].*/\1/p')
                 log "Debug: Rule number for deletion: '$rule_num'"
                 
                 if [[ -n "$rule_num" ]]; then
