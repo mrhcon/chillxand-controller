@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.12"
+CHILLXAND_VERSION="v1.1.13"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -457,7 +457,7 @@ check_and_fix_3001_rules() {
                 log "Debug: Searching for: '3001.*ALLOW.*$rule_ip'"
                 local matching_line=$(echo "$numbered_rules" | grep "3001.*ALLOW.*$rule_ip" | head -1)
                 log "Debug: Matching line: '$matching_line'"
-                local rule_num=$(echo "$matching_line" | sed -n 's/^\[\([0-9]*\)\].*/\1/p')
+                local rule_num=$(echo "$matching_line" | sed -n 's/^\[ *\([0-9]*\)\].*/\1/p')
                 log "Debug: Extracted rule number: '$rule_num'"
                 
                 if [[ -n "$rule_num" ]]; then
