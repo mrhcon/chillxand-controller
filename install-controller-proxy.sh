@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.9"
+CHILLXAND_VERSION="v1.1.10"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -435,34 +435,45 @@ check_and_fix_3001_rules() {
     log "Debug: Current 3001 rules output:"
     echo "$current_3001_rules"
 
+    # First pass: collect rule numbers for unwanted IPs
+    declare -a rules_to_delete=()
+
     while IFS= read -r rule_line; do
         log "Debug: Processing rule line: '$rule_line'"
         
         if [[ -n "$rule_line" && ! "$rule_line" =~ ^[[:space:]]*# ]]; then
-            # Extract IP from rule line - handle the actual UFW format
             local rule_ip=$(echo "$rule_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
             log "Debug: Extracted IP: '$rule_ip'"
 
-            # Check if this IP is in our wanted list
             if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
                 log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
-                log "Removing unwanted 3001 rule for $rule_ip..."
-
-                # Get rule number and delete it
+                
+                # Get rule number for deletion
                 local rule_num=$(ufw status numbered | grep "3001.*ALLOW.*$rule_ip" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
                 log "Debug: Rule number for deletion: '$rule_num'"
                 
                 if [[ -n "$rule_num" ]]; then
-                    ufw --force delete "$rule_num"
-                    log "Removed unwanted 3001 rule for $rule_ip"
+                    rules_to_delete+=("$rule_num")
+                    log "Queued rule $rule_num for deletion (IP: $rule_ip)"
                 fi
-            else
-                log "Debug: IP $rule_ip is wanted or empty, keeping rule"
             fi
-        else
-            log "Debug: Skipping empty or comment line"
         fi
     done <<< "$current_3001_rules"
+
+    # Second pass: delete rules in reverse order (highest numbers first)
+    if [[ ${#rules_to_delete[@]} -gt 0 ]]; then
+        # Sort rule numbers in descending order
+        IFS=$'\n' sorted_rules=($(sort -rn <<<"${rules_to_delete[*]}"))
+        unset IFS
+        
+        for rule_num in "${sorted_rules[@]}"; do
+            log "Deleting UFW rule number $rule_num..."
+            ufw --force delete "$rule_num"
+            log "Deleted rule number $rule_num"
+        done
+    else
+        log "No unwanted 3001 rules found for deletion"
+    fi
 
     # Add the deny rule back (should be last)
     if ufw status | grep -q "3001.*DENY.*Anywhere"; then
