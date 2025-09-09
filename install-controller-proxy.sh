@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.11"
+CHILLXAND_VERSION="v1.1.12"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -417,6 +417,12 @@ check_and_fix_3001_rules() {
     # Get numbered rules for deletion lookup
     local numbered_rules=$(ufw status numbered)
 
+    # DEBUG: Let's see what numbered_rules actually contains
+    log "Debug: Numbered rules output:"
+    echo "$numbered_rules"
+    log "Debug: Looking for rules with 174.114.192.84:"
+    echo "$numbered_rules" | grep "174.114.192.84" || log "Debug: No matches found for 174.114.192.84"
+
     # Check each IP we want
     for ip in "${!WANTED_3001_IPS[@]}"; do
         local comment="${WANTED_3001_IPS[$ip]}"
@@ -428,29 +434,6 @@ check_and_fix_3001_rules() {
             ufw allow from "$ip" to any port 3001 comment "$comment"
         fi
     done
-
-    # # Check for any 3001 rules that shouldn't exist
-    # while IFS= read -r rule_line; do
-    #     log "Debug: Processing rule line: '$rule_line'"
-
-    #     if [[ -n "$rule_line" && ! "$rule_line" =~ ^[[:space:]]*# ]]; then
-    #         # Extract IP from rule line - handle the actual UFW format
-    #         local rule_ip=$(echo "$rule_line" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i}')
-
-    #         # Check if this IP is in our wanted list
-    #         if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
-    #             log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
-    #             log "Removing unwanted 3001 rule for $rule_ip..."
-
-    #             # Get rule number and delete it
-    #             local rule_num=$(ufw status numbered | grep "3001.*ALLOW.*$rule_ip" | head -1 | grep -o '^\[[0-9]*\]' | tr -d '[]')
-    #             if [[ -n "$rule_num" ]]; then
-    #                 ufw --force delete "$rule_num"
-    #                 log "Removed unwanted 3001 rule for $rule_ip"
-    #             fi
-    #         fi
-    #     fi
-    # done <<< "$current_3001_rules"
 
     # Check for any 3001 rules that shouldn't exist
     log "Debug: Checking for unwanted 3001 rules..."
@@ -470,9 +453,12 @@ check_and_fix_3001_rules() {
             if [[ -n "$rule_ip" && -z "${WANTED_3001_IPS[$rule_ip]:-}" ]]; then
                 log "⚠️  Found unwanted 3001 rule for IP: $rule_ip"
                 
-                # Get rule number for deletion using pre-fetched numbered output
-                local rule_num=$(echo "$numbered_rules" | grep "3001.*ALLOW.*$rule_ip" | head -1 | sed -n 's/^\[\([0-9]*\)\].*/\1/p')
-                log "Debug: Rule number for deletion: '$rule_num'"
+                # DEBUG: Enhanced rule number lookup
+                log "Debug: Searching for: '3001.*ALLOW.*$rule_ip'"
+                local matching_line=$(echo "$numbered_rules" | grep "3001.*ALLOW.*$rule_ip" | head -1)
+                log "Debug: Matching line: '$matching_line'"
+                local rule_num=$(echo "$matching_line" | sed -n 's/^\[\([0-9]*\)\].*/\1/p')
+                log "Debug: Extracted rule number: '$rule_num'"
                 
                 if [[ -n "$rule_num" ]]; then
                     rules_to_delete+=("$rule_num")
