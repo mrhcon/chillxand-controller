@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.7"
+CHILLXAND_VERSION="v1.1.8"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -427,6 +427,14 @@ check_and_fix_3001_rules() {
             fi
         fi
     done <<< "$current_3001_rules"
+
+    # Add the deny rule back (should be last)
+    if ufw status | grep -q "3001.*DENY.*Anywhere"; then
+        log "✓ 3001 deny rule exists"
+    else
+        log "Adding 3001 deny rule..."
+        ufw deny 3001 comment 'Deny all other access to port 3001'
+    fi
 }
 
 remove_unwanted_rules() {
