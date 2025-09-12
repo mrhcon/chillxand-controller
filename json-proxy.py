@@ -62,6 +62,20 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             # Fallback to localhost if we can't determine IP
             return "localhost"
 
+    def _get_pnode_public_key(self):
+        """Extract public key from pnode-keypair.json file"""
+        try:
+            keypair_file = '/root/xandminerd/keypairs/pnode-keypair.json'
+            if os.path.exists(keypair_file):
+                with open(keypair_file, 'r') as f:
+                    keypair_data = json.load(f)
+                    # Return the public key if it exists in the JSON
+                    return keypair_data.get('publicKey', 'not_found')
+            else:
+                return 'file_not_found'
+        except Exception as e:
+            return f'error: {str(e)}'
+
     def _get_server_name(self):
         """Get the server's hostname"""
         try:
@@ -74,7 +88,8 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
         """Get server IP and hostname"""
         return {
             'ip': self._get_server_ip(),
-            'hostname': self._get_server_name()
+            'hostname': self._get_server_name(),
+            'public_key': self._get_pnode_public_key()
         }
 
     def _get_current_time(self):
@@ -110,6 +125,95 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'timestamp': self._get_current_time()
             }
 
+    def _check_seenodes_registration(self):
+        """Check if the local public key is registered in Xandeum devnet (seenodes)"""
+        try:
+            current_time = self._get_current_time()
+            
+            # Get our local public key
+            local_public_key = self._get_pnode_public_key()
+            
+            # If we can't get the public key, return error
+            if local_public_key in ['file_not_found', 'not_found'] or local_public_key.startswith('error:'):
+                return {
+                    'status': 'fail',
+                    'registered': False,
+                    'local_public_key': local_public_key,
+                    'error': 'Could not read local public key',
+                    'devnet_url': 'https://api.devnet.xandeum.com:8899/',
+                    'time': current_time
+                }
+
+            # Prepare the RPC request payload
+            rpc_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getProgramAccounts",
+                "params": [
+                    "6Bzz3KPvzQruqBg2vtsvkuitd6Qb4iCcr5DViifCwLsL",
+                    {
+                        "encoding": "base64",
+                        "dataSlice": {
+                            "offset": 0,
+                            "length": 0
+                        }
+                    }
+                ]
+            }
+
+            # Make the request to Xandeum devnet
+            response = requests.post(
+                'https://api.devnet.xandeum.com:8899/',
+                headers={'Content-Type': 'application/json'},
+                json=rpc_payload,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                rpc_data = response.json()
+                
+                # Check if our public key is in the results
+                registered_pubkeys = []
+                is_registered = False
+                
+                if 'result' in rpc_data and isinstance(rpc_data['result'], list):
+                    for account in rpc_data['result']:
+                        if 'pubkey' in account:
+                            pubkey = account['pubkey']
+                            registered_pubkeys.append(pubkey)
+                            if pubkey == local_public_key:
+                                is_registered = True
+
+                return {
+                    'status': 'pass' if is_registered else 'fail',
+                    'registered': is_registered,
+                    'local_public_key': local_public_key,
+                    'devnet_url': 'https://api.devnet.xandeum.com:8899/',
+                    'total_registered_accounts': len(registered_pubkeys),
+                    'response_code': response.status_code,
+                    'time': current_time
+                }
+            else:
+                return {
+                    'status': 'fail',
+                    'registered': False,
+                    'local_public_key': local_public_key,
+                    'devnet_url': 'https://api.devnet.xandeum.com:8899/',
+                    'response_code': response.status_code,
+                    'error': f'Seenodes RPC returned HTTP {response.status_code}',
+                    'time': current_time
+                }
+
+        except Exception as e:
+            return {
+                'status': 'fail',
+                'registered': False,
+                'local_public_key': local_public_key if 'local_public_key' in locals() else 'unknown',
+                'devnet_url': 'https://api.devnet.xandeum.com:8899/',
+                'error': str(e),
+                'time': self._get_current_time()
+            }
+    
     def _check_atlas_registration(self):
         """Check if this server's IP is registered in Atlas"""
         try:
@@ -1001,7 +1105,6 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
     def _get_health_data(self):
         # Get basic info first
         current_time = self._get_current_time()
-        server_info = self._get_server_info()
         server_ip = self._get_server_ip()
 
         health_data = {
@@ -1219,6 +1322,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': current_time
             }
             overall_status = 'fail'
+
+        # Check seenodes registration
+        try:
+            seenodes_check = self._check_seenodes_registration()
+            health_data['checks']['seenodes:registration'] = seenodes_check
+
+            if seenodes_check['status'] == 'fail':
+                overall_status = 'fail'
+
+        except Exception as e:
+            health_data['checks']['seenodes:registration'] = {
+                'status': 'fail',
+                'error': str(e),
+                'time': current_time
+            }
+            overall_status = 'fail'          
 
         # Check services for health status
         services = ['pod.service', 'xandminer.service', 'xandminerd.service']

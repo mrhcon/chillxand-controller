@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.15"
+CHILLXAND_VERSION="v1.1.16"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -686,6 +686,8 @@ show_completion_info() {
     echo "  - GET /restart/xandminerd - Restart xandminerd service"
     echo "  - GET /update/controller - Update controller script from GitHub"
     echo "  - GET /update/controller/log - View update log from last update operation"
+    echo "  - GET /update/pod - Update pod service to latest version"
+    echo "  - GET /update/pod/log - View update pod log from last update operation"
     echo
     info "Version Information:"
     echo "  - ChillXand Controller Version: ${CHILLXAND_VERSION}"
@@ -722,7 +724,9 @@ show_completion_info() {
     echo "  - Test summary endpoint: curl http://localhost:3001/summary"
     echo "  - Test versions endpoint: curl http://localhost:3001/versions"
     echo "  - Update controller: curl http://localhost:3001/update/controller"
-    echo "  - Check update log: curl http://localhost:3001/update/controller/log"
+    echo "  - Check controller update log: curl http://localhost:3001/update/controller/log"
+    echo "  - Update pod: curl http://localhost:3001/update/pod"
+    echo "  - Check pod update log: curl http://localhost:3001/update/pod/log"    
     echo
     info "Example Health Check Usage:"
     echo "  curl -s http://localhost:3001/health | jq '.status'"
