@@ -14,6 +14,9 @@ CHILLXAND_CONTROLLER_VERSION = "{{CHILLXAND_VERSION}}"
 # Atlas API Configuration
 ATLAS_API_URL = "{{ATLAS_API_URL}}"
 
+# Seenodes API Configuration
+SEENODES_API_URL = "{{SEENODES_API_URL}}"
+
 UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
@@ -110,6 +113,15 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'timestamp': self._get_current_time()
             }
 
+    def _get_pnode_keypair(self):
+        """Get the pnode public key"""
+        try:
+            with open('/root/xandminerd/keypairs/pnode-keypair.json', 'r') as f:
+                keypair_data = json.load(f)
+            return keypair_data.get('publicKey')
+        except:
+            return None
+
     def _check_atlas_registration(self):
         """Check if this server's IP is registered in Atlas"""
         try:
@@ -134,7 +146,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                         pod_address = pod_entry['address']
                         pod_ip = pod_address.split(':')[0]
                         if pod_ip == server_ip:
-                            found_pod = pod_entry
+                            # Clean up the pod entry by stripping null characters from version
+                            cleaned_pod_entry = pod_entry.copy()
+                            if 'version' in cleaned_pod_entry:
+                                cleaned_pod_entry['version'] = cleaned_pod_entry['version'].rstrip('\x00')
+                            found_pod = cleaned_pod_entry
                             found_ip = True
                             break
 
@@ -163,6 +179,60 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return {
                 'status': 'fail',
                 'atlas_url': ATLAS_API_URL,
+                'registered': False,
+                'error': str(e),
+                'time': self._get_current_time()
+            }
+
+    def _check_xandeum_seenodes(self):
+        """Check if this server's pnode keypair is registered in Xandeum seenodes"""
+        try:
+            # Get our pnode keypair
+            pnode_pubkey = self._get_pnode_keypair()
+            
+            if not pnode_pubkey:
+                return {
+                    'status': 'fail',
+                    'registered': False,
+                    'error': 'No pnode keypair found',
+                    'pnode_pubkey': None,
+                    'time': self._get_current_time()
+                }
+
+            # Query Xandeum seenodes API
+            response = requests.get(
+                f'{SEENODES_API_URL}?pubkey={pnode_pubkey}',
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                seenodes_data = response.json()
+
+                # Check if our pubkey is registered
+                found_registered = seenodes_data.get('success', False) and seenodes_data.get('exists', False)
+
+                return {
+                    'status': 'pass' if found_registered else 'fail',
+                    'registered': found_registered,
+                    'pnode_pubkey': pnode_pubkey,
+                    'seenodes_url': SEENODES_API_URL,
+                    'response_code': response.status_code,
+                    'time': self._get_current_time()
+                }
+            else:
+                return {
+                    'status': 'fail',
+                    'registered': False,
+                    'pnode_pubkey': pnode_pubkey,
+                    'seenodes_url': 'https://control.chillxand.com/pnode-farm/xandeum_seenodes_checker.php',
+                    'response_code': response.status_code,
+                    'error': f'Seenodes API returned HTTP {response.status_code}',
+                    'time': self._get_current_time()
+                }
+
+        except Exception as e:
+            return {
+                'status': 'fail',
                 'registered': False,
                 'error': str(e),
                 'time': self._get_current_time()
@@ -644,7 +714,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'xandminer': self._get_service_status('xandminer.service'),
                 'xandminerd': self._get_service_status('xandminerd.service')
             },
-            'health': self._get_health_data()
+            'health': self._get_health_data(),
+            'xandeum': {
+                'publicKey': self._get_pnode_keypair()
+            }
         }
         return summary
 
@@ -1018,6 +1091,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'client_ip': self.client_address[0]
             },
             'checks': {},
+            'xandeum':{},
             'links': {
                 'stats': f'http://{server_ip}:3001/stats',
                 'versions': f'http://{server_ip}:3001/versions',
@@ -1063,6 +1137,10 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'observedUnit': 'load_average',
                 'load_per_cpu': round(load_per_cpu, 2),
                 'time': current_time
+            }
+
+            health_data['xandeum'] = {
+                'publicKey': self._get_pnode_keypair()
             }
 
         except Exception as e:
@@ -1219,6 +1297,22 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 'time': current_time
             }
             overall_status = 'fail'
+
+        # Check Xandeum seenodes registration
+        try:
+            seenodes_check = self._check_xandeum_seenodes()
+            health_data['checks']['xandeum:seenodes'] = seenodes_check
+
+            # if seenodes_check['status'] == 'fail':
+            #     overall_status = 'fail'
+
+        except Exception as e:
+            health_data['checks']['xandeum:seenodes'] = {
+                'status': 'fail',
+                'error': str(e),
+                'time': current_time
+            }
+            # overall_status = 'fail'
 
         # Check services for health status
         services = ['pod.service', 'xandminer.service', 'xandminerd.service']

@@ -4,10 +4,13 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.16"
+CHILLXAND_VERSION="v1.1.17"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
+
+# SeeNodes API Configuration
+SEENODES_API_URL="https://control.chillxand.com/pnode-farm/xandeum_seenodes_checker.php"
 
 # SSH Key Authentication Configuration
 DEFAULT_USERNAME="chillxand"
