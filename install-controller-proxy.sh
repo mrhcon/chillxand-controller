@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.17"
+CHILLXAND_VERSION="v1.1.18"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -209,6 +209,7 @@ create_python_script() {
     # Replace placeholders
     sed -e "s/{{CHILLXAND_VERSION}}/$CHILLXAND_VERSION/g" \
         -e "s|{{ATLAS_API_URL}}|$ATLAS_API_URL|g" \
+        -e "s|{{SEENODES_API_URL}}|$SEENODES_API_URL|g" \
         -e "/{{ALLOWED_IPS}}/r /dev/stdin" \
         -e "/{{ALLOWED_IPS}}/d" \
         /tmp/json-proxy-template.py > /opt/json-proxy.py << EOF
