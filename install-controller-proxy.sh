@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.19"
+CHILLXAND_VERSION="v1.1.20"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -680,7 +680,7 @@ show_completion_info() {
     info "Available Endpoints:"
     echo "  - GET /health       - RFC-compliant health check with service monitoring"
     echo "  - GET /summary      - Complete system summary with controller version"
-    echo "  - GET /stats        - Proxy to localhost:80/stats"
+    echo "  - GET /stats        - Proxy to localhost:<statsport>/stats"
     echo "  - GET /versions     - Proxy to localhost:4000/versions + controller version"
     echo "  - GET /status/pod   - Pod service status"
     echo "  - GET /status/xandminer - Xandminer service status"

@@ -17,6 +17,9 @@ ATLAS_API_URL = "{{ATLAS_API_URL}}"
 # Seenodes API Configuration
 SEENODES_API_URL = "{{SEENODES_API_URL}}"
 
+# Stats service port fallback list - add ports as you discover them
+STATS_PORTS = [80, 3500, 8080]
+
 UPDATE_STATE_FILE = "/tmp/update-state.json"
 
 # Allowed IP addresses - WHITELIST ONLY
@@ -634,14 +637,16 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             return None
 
     def _get_stats_data(self):
-        try:
-            response = requests.get('http://localhost:80/stats', timeout=5)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {'error': f'HTTP {response.status_code}'}
-        except Exception as e:
-            return {'error': str(e)}
+        """Get stats data with fallback to common ports"""
+        for port in STATS_PORTS:
+            try:
+                response = requests.get(f'http://localhost:{port}/stats', timeout=5)
+                if response.status_code == 200:
+                    return response.json()
+            except Exception:
+                continue
+        
+        return {'error': f'Stats not available on ports: {", ".join(map(str, STATS_PORTS))}'}
 
     def _get_versions_data(self):
         try:
@@ -1384,12 +1389,18 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json_response(summary_data)
 
             elif self.path == '/stats':
-                response = requests.get('http://localhost:80/stats', timeout=10)
-                self.send_response(response.status_code)
-                self.send_header('Content-type', 'application/json')
-                self._set_cors_headers()
-                self.end_headers()
-                self.wfile.write(response.content)
+                for port in STATS_PORTS:
+                    try:
+                        response = requests.get(f'http://localhost:{port}/stats', timeout=10)
+                        if response.status_code == 200:
+                            self.send_response(response.status_code)
+                            self.send_header('Content-type', 'application/json')
+                            self._set_cors_headers()
+                            self.end_headers()
+                            self.wfile.write(response.content)
+                            return
+                    except Exception:
+                        continue
 
             elif self.path == '/versions':
                 versions_data = self._get_versions_data()
