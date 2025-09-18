@@ -4,7 +4,7 @@
 # This script installs and configures the JSON proxy service
 
 # ChillXand Controller Version - Update this for each deployment
-CHILLXAND_VERSION="v1.1.20"
+CHILLXAND_VERSION="v1.1.21"
 
 # Atlas API Configuration
 ATLAS_API_URL="http://atlas.devnet.xandeum.com:3000/api/pods"
@@ -339,6 +339,14 @@ check_and_fix_basic_rules() {
         ufw allow 5000/udp comment 'Pod UDP - Public access'
     fi
 
+    # Check UDP 9001 rule
+    if ufw status | grep -q "9001/udp.*ALLOW.*Anywhere"; then
+        log "✓ UDP 9001 rule exists"
+    else
+        log "Adding UDP 9001 rule..."
+        ufw allow 9001/udp comment 'Pod UDP 9001 - Public access'
+    fi
+
     # Check localhost-only rules and fix broad rules
     local_ports=("80:Pod HTTP" "3000:Next.js" "4000:Node.js")
 
@@ -507,6 +515,7 @@ show_final_status() {
     # Count and verify each rule type
     local ssh_rules=$(ufw status | grep -c "22.*ALLOW.*Anywhere" || echo "0")
     local udp_rules=$(ufw status | grep -c "5000/udp.*ALLOW.*Anywhere" || echo "0")
+    local udp_9001_rules=$(ufw status | grep -c "9001/udp.*ALLOW.*Anywhere" || echo "0")
     local local_80=$(ufw status | grep -c "80.*ALLOW.*127.0.0.1" || echo "0")
     local local_3000=$(ufw status | grep -c "3000.*ALLOW.*127.0.0.1" || echo "0")
     local local_4000=$(ufw status | grep -c "4000.*ALLOW.*127.0.0.1" || echo "0")
@@ -515,6 +524,7 @@ show_final_status() {
 
     echo "✅ SSH (22/tcp): $ssh_rules rule(s)"
     echo "✅ UDP 5000: $udp_rules rule(s)"
+    echo "✅ UDP 9001: $udp_9001_rules rule(s)"
     echo "✅ HTTP (80): $local_80 localhost rule(s)"
     echo "✅ Next.js (3000): $local_3000 localhost rule(s)"
     echo "✅ Node.js (4000): $local_4000 localhost rule(s)"

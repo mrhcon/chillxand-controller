@@ -490,7 +490,7 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
             }
 
     def _check_connectivity(self):
-        """Check UDP 5000 public access and localhost TCP ports"""
+        """Check UDP 5000/9001 public access and localhost TCP ports"""
         try:
             current_time = self._get_current_time()
             server_info = self._get_server_info()
@@ -527,12 +527,37 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                         }
                         # Turn off until 5000 check is confirmed.
                         # results['status'] = 'fail'
+
+                    # Test UDP 9001 connectivity
+                    udp_9001_test = subprocess.run([
+                        'timeout', '10', 'nc', '-zu', server_ip, '9001'
+                    ], capture_output=True, timeout=15)
+
+                    if udp_9001_test.returncode == 0:
+                        results['checks']['udp_9001_public'] = {
+                            'status': 'pass',
+                            'message': 'UDP 9001 PUBLIC',
+                            'accessible': True
+                        }
+                    else:
+                        results['checks']['udp_9001_public'] = {
+                            'status': 'fail',
+                            'message': 'UDP 9001 NOT PUBLIC',
+                            'accessible': False
+                        }
+                        # Turn off until 9001 check is confirmed.
+                        # results['status'] = 'fail'                        
                 else:
                     results['checks']['udp_5000_public'] = {
                         'status': 'warn',
                         'message': 'netcat (nc) not installed - cannot test UDP 5000',
                         'accessible': 'unknown'
                     }
+                    results['checks']['udp_9001_public'] = {
+                        'status': 'warn',
+                        'message': 'netcat (nc) not installed - cannot test UDP 9001',
+                        'accessible': 'unknown'
+                    }                    
                     if results['status'] == 'pass':
                         results['status'] = 'warn'
             except Exception as e:
@@ -541,6 +566,11 @@ class ReadOnlyHandler(http.server.BaseHTTPRequestHandler):
                     'message': f'UDP test failed: {str(e)}',
                     'accessible': False
                 }
+                results['checks']['udp_9001_public'] = {
+                    'status': 'fail',
+                    'message': f'UDP test failed: {str(e)}',
+                    'accessible': False
+                }                
                 results['status'] = 'fail'
 
             # Check localhost TCP ports 3000 and 4000
